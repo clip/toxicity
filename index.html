@@ -1,0 +1,2018 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+  /* ===== SETUP: paste your Cloudflare Worker URL between the quotes (see README) ===== */
+  window.RFM_API = "https://red-flag-meter-api.kevdevwebb.workers.dev";
+  /* The Discord webhook does NOT go here. It's a secret on the Worker. */
+</script>
+<title>Red Flag Meter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Unbounded:wght@500;700;800&display=swap">
+<style>
+/* Layout: one phone-width column. Brand bar + sticky tab nav (Play / Comments / Learn). Play: iMessage thread, color slider, tags, sticky action. Results and replies open in a bottom sheet. */
+:root {
+  --bg: #0e0d12;
+  --surface: #17161d;
+  --surface-2: #211f29;
+  --line: #2c2a35;
+  --fg: #f4f2f8;
+  --muted: #9a96a6;
+  --ok: #34d27b;
+  --bad: #ff4d61;
+  --fire: #ff8a2a;
+  --link: #6f9bff;
+  --scrim: rgba(6, 5, 10, .6);
+  --im-bg: #000000;
+  --im-head: rgba(28, 28, 30, .92);
+  --im-them: #26252a;
+  --im-them-fg: #ffffff;
+  --im-blue: #0a84ff;
+  --im-meta: #8e8e93;
+  --im-line: #2a2a2d;
+  --lum: 56%;
+  --font-display: "Unbounded", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Geist", "Segoe UI", system-ui, sans-serif;
+  --font-im: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f5f4f8; --surface: #ffffff; --surface-2: #eeedf3; --line: #e2e0e9; --fg: #15141a; --muted: #67636f;
+    --ok: #179f55; --bad: #e02f45; --fire: #e86b0c; --link: #2f62ea; --scrim: rgba(20, 18, 30, .35);
+    --im-bg: #ffffff; --im-head: rgba(247, 247, 247, .94); --im-them: #e9e9eb; --im-them-fg: #000000; --im-blue: #007aff; --im-meta: #8a8a8e; --im-line: #dcdce0;
+    --lum: 50%; color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f5f4f8; --surface: #ffffff; --surface-2: #eeedf3; --line: #e2e0e9; --fg: #15141a; --muted: #67636f;
+  --ok: #179f55; --bad: #e02f45; --fire: #e86b0c; --link: #2f62ea; --scrim: rgba(20, 18, 30, .35);
+  --im-bg: #ffffff; --im-head: rgba(247, 247, 247, .94); --im-them: #e9e9eb; --im-them-fg: #000000; --im-blue: #007aff; --im-meta: #8a8a8e; --im-line: #dcdce0;
+  --lum: 50%; color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { overflow-x: clip; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.5; margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 0; -webkit-font-smoothing: antialiased;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 540px; margin: 0 auto; display: grid; gap: 18px; }
+a { color: var(--link); }
+:focus-visible { outline: 3px solid var(--link); outline-offset: 2px; }
+
+/* Brand + nav */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.logo { font-family: var(--font-display); font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; line-height: 1.1; }
+.logo i { font-style: normal; display: inline-block; width: .55em; height: .55em; border-radius: 3px; margin-right: 8px; background: hsl(0 75% var(--lum)); vertical-align: .05em; }
+.counters { display: flex; gap: 8px; align-items: center; }
+.pill { display: flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pill small { color: var(--muted); font-weight: 500; font-size: .78rem; }
+.pill.streak { font-family: var(--font-display); font-size: 1rem; }
+.pill.streak.hot { border-color: var(--fire); box-shadow: 0 0 0 3px color-mix(in srgb, var(--fire) 22%, transparent); }
+.bump { animation: bump .5s cubic-bezier(.3,1.6,.5,1); }
+@keyframes bump { 40% { transform: scale(1.25); } }
+.nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 16px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line); backdrop-filter: blur(10px); }
+.nav button { position: relative; border: 0; background: transparent; color: var(--muted); font: 600 .9rem var(--font-body); padding: 9px 6px; border-radius: 12px; cursor: pointer; }
+.nav button[aria-current="page"] { background: var(--fg); color: var(--bg); }
+.dotcount { position: absolute; top: 3px; right: 8px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--bad); color: #fff; font-size: .68rem; font-weight: 700; display: grid; place-items: center; font-variant-numeric: tabular-nums; }
+
+/* iMessage */
+.im { background: var(--im-bg); border: 1px solid var(--im-line); border-radius: 28px; overflow: hidden; font-family: var(--font-im); }
+.im-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 10px 14px 8px; background: var(--im-head); border-bottom: 1px solid var(--im-line); }
+.im-back { color: var(--im-blue); font-size: 1.05rem; display: flex; align-items: center; gap: 2px; }
+.im-back svg, .im-cam svg { width: 22px; height: 22px; }
+.im-who { display: grid; justify-items: center; gap: 3px; }
+.im-av { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font: 600 1.2rem var(--font-im); color: #fff; background: linear-gradient(180deg, #a5abb8, #858994); }
+.im-name { font-size: .74rem; color: var(--fg); display: flex; align-items: center; gap: 1px; }
+.im-name svg { width: 10px; height: 10px; opacity: .5; }
+.im-cam { justify-self: end; color: var(--im-blue); display: flex; align-items: center; gap: 8px; }
+.im-tag { font: 600 .62rem var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--im-meta); border: 1px solid var(--im-line); border-radius: 99px; padding: 2px 7px; }
+.im-body { padding: 10px 16px 14px; display: flex; flex-direction: column; min-height: 180px; }
+.im-time { align-self: center; text-align: center; font-size: .72rem; color: var(--im-meta); margin: 12px 0 6px; }
+.im-time b { font-weight: 600; }
+.b { position: relative; max-width: 76%; padding: 7px 12px; border-radius: 18px; font-size: 1rem; line-height: 1.32; margin-top: 2px; overflow-wrap: anywhere; animation: rise .32s cubic-bezier(.2,.9,.3,1.15) both; }
+.b.you { align-self: flex-end; background: var(--im-blue); color: #fff; }
+.b.them { align-self: flex-start; background: var(--im-them); color: var(--im-them-fg); }
+.b.gap { margin-top: 10px; }
+.b.tail.you::before, .b.tail.you::after, .b.tail.them::before, .b.tail.them::after { content: ""; position: absolute; bottom: 0; height: 18px; }
+.b.tail.you::before { right: -7px; width: 20px; background: var(--im-blue); border-bottom-left-radius: 16px 14px; }
+.b.tail.you::after { right: -26px; width: 26px; background: var(--im-bg); border-bottom-left-radius: 10px; }
+.b.tail.them::before { left: -7px; width: 20px; background: var(--im-them); border-bottom-right-radius: 16px 14px; }
+.b.tail.them::after { left: -26px; width: 26px; background: var(--im-bg); border-bottom-right-radius: 10px; }
+.b.emoji { background: transparent !important; font-size: 2.2rem; padding: 0 2px; }
+.b.emoji::before, .b.emoji::after { display: none; }
+.rcpt { align-self: flex-end; font-size: .7rem; color: var(--im-meta); margin: 2px 2px 0 0; }
+.rcpt b { font-weight: 600; }
+.im-input { display: flex; align-items: center; gap: 8px; padding: 8px 12px 12px; }
+.im-plus { width: 30px; height: 30px; border-radius: 50%; background: var(--im-them); color: var(--im-meta); display: grid; place-items: center; font-size: 1.2rem; flex: none; }
+.im-field { flex: 1; border: 1px solid var(--im-line); border-radius: 99px; padding: 6px 14px; font-size: .92rem; color: var(--im-meta); }
+@keyframes rise { from { transform: translateY(8px) scale(.97); opacity: 0; } }
+
+/* Sections + controls */
+.section { display: grid; gap: 12px; }
+.row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.label { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+.hint { font-size: .82rem; color: var(--muted); }
+.pick { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: .9rem; }
+.pick i { width: 12px; height: 12px; border-radius: 4px; background: var(--line); display: inline-block; }
+.slider { position: relative; height: 72px; --thumb: var(--surface-2); --tw: 34px; }
+.track { position: absolute; left: 0; right: 0; top: 14px; height: 44px; border-radius: 16px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 8%, transparent); }
+.slider input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; z-index: 3; }
+.slider input:focus-visible { outline: none; }
+.slider input::-webkit-slider-runnable-track { height: 72px; background: transparent; }
+.slider input::-moz-range-track { height: 72px; background: transparent; }
+.slider input::-webkit-slider-thumb { -webkit-appearance: none; width: var(--tw); height: 64px; margin-top: 4px; border-radius: 14px; background: var(--thumb); border: 3px solid var(--fg); box-shadow: 0 6px 18px -6px rgba(0,0,0,.6); }
+.slider input::-moz-range-thumb { width: calc(var(--tw) - 6px); height: 58px; border-radius: 14px; background: var(--thumb); border: 3px solid var(--fg); }
+.slider.untouched input::-webkit-slider-thumb { border-style: dashed; border-color: var(--muted); background: color-mix(in srgb, var(--bg) 55%, transparent); }
+.slider.untouched input::-moz-range-thumb { border-style: dashed; border-color: var(--muted); background: color-mix(in srgb, var(--bg) 55%, transparent); }
+.slider input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px var(--link); }
+.slider.revealed input { pointer-events: none; }
+.zone { position: absolute; top: 8px; height: 56px; border: 3px solid var(--fg); border-radius: 16px; z-index: 2; background: color-mix(in srgb, var(--fg) 10%, transparent); animation: fade .3s ease both; }
+.flag { position: absolute; top: -18px; font-size: .66rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; transform: translateX(-50%); white-space: nowrap; z-index: 4; }
+.ends { display: flex; justify-content: space-between; font-size: .74rem; color: var(--muted); gap: 4px; }
+.ends span { flex: 1; text-align: center; } .ends span:first-child { text-align: left; } .ends span:last-child { text-align: right; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { position: relative; border: 1px solid var(--line); background: var(--surface); color: var(--fg); padding: 8px 14px; border-radius: 99px; font: 500 .9rem var(--font-body); cursor: pointer; transition: background .15s, border-color .15s, transform .1s; }
+.chip:hover { border-color: var(--muted); }
+.chip:active { transform: scale(.96); }
+.chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+@media (hover: hover) {
+  .chip::after { content: attr(data-def); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translate(-50%, 4px); width: max-content; max-width: 220px; padding: 8px 11px; border-radius: 10px; background: var(--fg); color: var(--bg); font-size: .8rem; font-weight: 500; line-height: 1.35; text-align: left; white-space: normal; opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; z-index: 6; }
+  .chip:first-child::after { left: 0; transform: translate(0, 4px); }
+  .chip:hover::after, .chip:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
+  .chip:first-child:hover::after, .chip:first-child:focus-visible::after { transform: translate(0, 0); }
+}
+.defline { margin: 0; font-size: .86rem; color: var(--muted); min-height: 2.6em; }
+.defline b { color: var(--fg); font-weight: 600; }
+.dock { position: sticky; bottom: 0; padding-block: 16px calc(14px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(to top, var(--bg) 70%, transparent); z-index: 5; }
+.btn { width: 100%; padding: 16px; border: 0; border-radius: 18px; font: 700 1rem var(--font-display); cursor: pointer; background: var(--fg); color: var(--bg); transition: transform .1s, opacity .15s; }
+.btn:active { transform: scale(.98); }
+.btn:disabled { opacity: .3; cursor: not-allowed; }
+.btn.fire { background: var(--fire); color: #fff; }
+.small-btn { padding: 9px 16px; border-radius: 12px; border: 0; background: var(--fg); color: var(--bg); font: 600 .88rem var(--font-body); cursor: pointer; }
+.small-btn.ghost { background: var(--surface-2); color: var(--fg); }
+.small-btn:disabled { opacity: .35; cursor: not-allowed; }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.linkbtn:hover { color: var(--fg); }
+.foot { font-size: .78rem; color: var(--muted); text-align: center; margin: 0; padding-bottom: 6px; }
+.gen { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--muted); }
+.gen .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--fire); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Sheet + toast */
+.scrim { position: fixed; inset: 0; background: var(--scrim); backdrop-filter: blur(3px); z-index: 20; animation: fade .2s ease both; }
+@keyframes fade { from { opacity: 0; } }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; margin: 0 auto; max-width: 580px; max-height: 90%; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-bottom: 0; border-radius: 28px 28px 0 0; animation: up .38s cubic-bezier(.2,.9,.25,1) both; padding-left: max(18px, env(safe-area-inset-left, 0px)); padding-right: max(18px, env(safe-area-inset-right, 0px)); padding-block: 10px calc(18px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 16px; }
+@keyframes up { from { transform: translateY(100%); } }
+.grabber { width: 40px; height: 5px; border-radius: 99px; background: var(--line); margin: 0 auto; }
+.sheet .next { position: sticky; bottom: 0; box-shadow: 0 -12px 18px 4px var(--surface); }
+.toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 30; max-width: min(92vw, 420px); background: var(--fg); color: var(--bg); padding: 12px 16px; border-radius: 16px; font-size: .9rem; font-weight: 500; box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); animation: rise .3s ease both; cursor: pointer; border: 0; text-align: left; }
+
+/* Result */
+.result { display: flex; gap: 14px; align-items: center; }
+.badge { min-width: 70px; height: 70px; padding: 0 10px; border-radius: 20px; display: grid; place-items: center; font: 700 .78rem var(--font-display); color: #fff; flex: none; text-align: center; line-height: 1.15; text-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.result h2 { margin: 0; font-family: var(--font-display); font-size: 1.15rem; line-height: 1.25; text-wrap: balance; letter-spacing: -0.01em; }
+.result p { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
+.compare { display: grid; gap: 6px; }
+.compare .bar { position: relative; height: 18px; border-radius: 8px; }
+.compare .dot { position: absolute; top: 50%; width: 14px; height: 26px; border-radius: 6px; border: 2.5px solid var(--fg); transform: translate(-50%, -50%); background: var(--surface); }
+.compare .dot.real { background: var(--fg); }
+.compare .key { display: flex; gap: 14px; font-size: .78rem; color: var(--muted); }
+.compare .key span::before { content: ""; display: inline-block; width: 9px; height: 13px; border-radius: 3px; border: 2px solid var(--fg); margin-right: 6px; vertical-align: -2px; }
+.compare .key span.r::before { background: var(--fg); }
+.status { border-radius: 16px; padding: 12px 14px; font-weight: 600; }
+.status.win { background: color-mix(in srgb, var(--fire) 14%, transparent); color: var(--fire); }
+.status.lose { background: color-mix(in srgb, var(--bad) 13%, transparent); color: var(--bad); }
+.why { margin: 0; font-size: 1rem; }
+.breakdown { display: grid; gap: 8px; }
+.tagnote { border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; display: grid; gap: 4px; }
+.tagnote .t { display: flex; align-items: center; gap: 8px; font-weight: 600; flex-wrap: wrap; }
+.tagnote .t span { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; padding: 3px 8px; border-radius: 99px; }
+.tagnote p { margin: 0; font-size: .92rem; color: var(--muted); }
+.tagnote.right .t span { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.tagnote.wrong .t span { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+.tagnote.missed .t span { background: var(--surface-2); color: var(--fg); }
+.tagnote.wrong { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+.tagpills { display: flex; flex-wrap: wrap; gap: 6px; }
+.tagpill { font-size: .78rem; font-weight: 600; padding: 4px 10px; border-radius: 99px; background: var(--surface-2); }
+.sources { display: grid; gap: 6px; }
+.sources a { display: flex; justify-content: space-between; gap: 10px; padding: 10px 14px; border-radius: 14px; background: var(--surface-2); color: var(--fg); text-decoration: none; font-size: .9rem; }
+.sources a span:first-child { min-width: 0; }
+.sources a span:last-child { color: var(--muted); flex: none; }
+.sources a:hover { background: var(--line); }
+
+/* Comments */
+.clist { display: grid; gap: 12px; }
+.cmt { display: flex; gap: 10px; align-items: flex-start; }
+.cmt.reply { margin-left: 40px; }
+.cav { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: 700 .75rem var(--font-display); background: var(--surface-2); color: var(--muted); flex: none; }
+.cmt-body { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.cmt-bubble { background: var(--surface-2); border-radius: 4px 16px 16px 16px; padding: 8px 12px; }
+.cmt-bubble.mine { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 50%, transparent); }
+.cmt-meta { display: flex; gap: 8px; align-items: baseline; font-size: .78rem; color: var(--muted); }
+.cmt-meta b { color: var(--fg); font-weight: 600; font-size: .85rem; }
+.cmt p { margin: 2px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; font-size: .94rem; }
+.cmt-acts { display: flex; gap: 14px; font-size: .78rem; padding-left: 4px; }
+.empty { margin: 0; padding: 14px; border-radius: 14px; border: 1px dashed var(--line); color: var(--muted); font-size: .9rem; text-align: center; }
+.composer { display: grid; gap: 8px; }
+.composer textarea { width: 100%; resize: vertical; min-height: 64px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: 400 .95rem var(--font-body); }
+.composer .row { align-items: center; }
+.replying { display: flex; justify-content: space-between; gap: 8px; font-size: .82rem; color: var(--muted); background: var(--surface-2); padding: 6px 10px; border-radius: 10px; }
+
+/* Comments view */
+.subtabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.subtabs button { border: 1px solid var(--line); background: var(--surface); color: var(--fg); padding: 7px 13px; border-radius: 99px; font: 600 .84rem var(--font-body); cursor: pointer; }
+.subtabs button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.feed { display: grid; gap: 8px; }
+.item { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 18px; background: var(--surface); border: 1px solid var(--line); cursor: pointer; text-align: left; color: var(--fg); font: inherit; width: 100%; }
+.item:hover { border-color: var(--muted); }
+.item .im-av { width: 40px; height: 40px; font-size: 1rem; }
+.item-main { min-width: 0; }
+.item-main b { font-weight: 600; display: block; }
+.item-main span { display: block; font-size: .86rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-side { font-size: .76rem; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.item.unread { border-color: color-mix(in srgb, var(--link) 55%, var(--line)); }
+.unreaddot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--link); margin-left: 6px; vertical-align: 1px; }
+.back { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; color: var(--link); font: 600 .95rem var(--font-body); cursor: pointer; padding: 0; justify-self: start; }
+.answer { border: 1px solid var(--line); border-radius: 18px; padding: 14px; display: grid; gap: 10px; background: var(--surface); }
+
+/* Learn view */
+.h1 { margin: 0; font-family: var(--font-display); font-size: 1.5rem; letter-spacing: -0.02em; line-height: 1.2; text-wrap: balance; }
+.lead { margin: 0; color: var(--muted); max-width: 60ch; }
+.gloss { display: grid; gap: 10px; }
+.gcard { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 14px 16px; display: grid; gap: 8px; }
+.gcard h3 { margin: 0; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; }
+.gcard h3 i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.gcard p { margin: 0; font-size: .92rem; }
+.gcard dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: .88rem; }
+.gcard dt { color: var(--muted); }
+.gcard dd { margin: 0; min-width: 0; }
+.gcard .srcs { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .85rem; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 16px; display: grid; gap: 10px; }
+.panel h3 { margin: 0; font-size: 1.02rem; }
+.panel p { margin: 0; font-size: .92rem; color: var(--muted); }
+.panel p b { color: var(--fg); }
+.switch { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.switch input { width: 44px; height: 26px; accent-color: var(--fire); flex: none; }
+.statgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.statgrid div { background: var(--surface-2); border-radius: 12px; padding: 10px; text-align: center; }
+.statgrid b { display: block; font-family: var(--font-display); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.statgrid span { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+
+@media (max-width: 380px) { .nav button { font-size: .82rem; } .cmt.reply { margin-left: 24px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* v5 additions */
+.nav { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.nav button[hidden] { display: none; }
+.fb { gap: 8px; }
+.fbrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: .9rem; }
+.fbbtns { display: flex; gap: 6px; flex: none; }
+.fbb { width: 44px; height: 38px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); font-size: 1.1rem; cursor: pointer; }
+.fbb[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); }
+.fbnote { width: 100%; min-height: 44px; resize: vertical; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: 400 .9rem var(--font-body); }
+.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.kpis div { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px; }
+.kpis b { display: block; font-family: var(--font-display); font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+.kpis span { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.tablewrap { overflow-x: auto; }
+.itable { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
+.itable th { text-align: left; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.itable td { padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.fbitem { display: grid; gap: 2px; padding: 10px 0; border-top: 1px solid var(--line); font-size: .9rem; }
+.fbitem:first-of-type { border-top: 0; }
+.fbnote-q { font-size: .86rem; color: var(--fg); font-style: italic; }
+.exportbox { width: 100%; min-height: 140px; font: .78rem ui-monospace, Menlo, monospace; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.modebar { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.modebar .mname { font-family: var(--font-display); font-weight: 700; font-size: .95rem; letter-spacing: -0.01em; }
+.modes { display: grid; gap: 10px; }
+.mcard { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; padding: 16px; border-radius: 20px; background: var(--surface); border: 1px solid var(--line); text-align: left; color: var(--fg); font: inherit; cursor: pointer; width: 100%; }
+.mcard:hover { border-color: var(--muted); }
+.mcard[aria-current="true"] { border-color: var(--fg); box-shadow: 0 0 0 1px var(--fg); }
+.mcard .mi { width: 54px; height: 54px; border-radius: 16px; display: grid; place-items: center; font-size: 1.6rem; }
+.mcard b { display: block; font-family: var(--font-display); font-size: 1rem; letter-spacing: -0.01em; }
+.mcard span { display: block; font-size: .88rem; color: var(--muted); }
+.mcard small { display: block; font-size: .76rem; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.im.compact { border-radius: 22px; }
+.im.compact .im-head { padding: 8px 12px 6px; }
+.im.compact .im-av { width: 34px; height: 34px; font-size: .95rem; }
+.im.compact .im-body { min-height: 0; padding: 6px 14px 12px; }
+.im.compact .b { font-size: .93rem; }
+.im.compact .im-input { display: none; }
+.pair { display: grid; gap: 10px; }
+.pcol { display: grid; gap: 8px; }
+.plabel { display: flex; justify-content: space-between; align-items: center; }
+.plabel b { font-family: var(--font-display); font-size: .9rem; }
+.vs { justify-self: center; font: 800 .8rem var(--font-display); color: var(--muted); letter-spacing: .1em; }
+.pickbtn { padding: 13px; font-size: .92rem; }
+.pcol.won .im { box-shadow: 0 0 0 3px var(--ok); }
+.pcol.lost .im { opacity: .8; }
+.minibadge { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; font-weight: 700; padding: 4px 10px; border-radius: 99px; color: #fff; }
+.resultpanel { display: grid; gap: 12px; padding: 16px; border-radius: 20px; background: var(--surface); border: 1px solid var(--line); animation: rise .3s ease both; }
+.resultpanel h2 { margin: 0; font-family: var(--font-display); font-size: 1.1rem; }
+.resultpanel p { margin: 0; font-size: .93rem; }
+.resultpanel p.muted { color: var(--muted); }
+.timer { height: 10px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.timer i { display: block; height: 100%; background: linear-gradient(90deg, var(--ok), var(--fire), var(--bad)); transition: width .25s linear; }
+.blitzhud { display: flex; justify-content: space-between; align-items: baseline; font-variant-numeric: tabular-nums; }
+.blitzhud b { font-family: var(--font-display); font-size: 1.6rem; }
+.blitzbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.blitzbtns button { padding: 18px 10px; border-radius: 18px; border: 0; font: 700 1rem var(--font-display); color: #fff; cursor: pointer; }
+.blitzbtns .red { background: hsl(0 72% var(--lum)); }
+.blitzbtns .green { background: hsl(140 60% var(--lum)); }
+.blitzbtns button:active { transform: scale(.97); }
+.flash-ok { animation: okf .35s ease; } .flash-bad { animation: badf .35s ease; }
+@keyframes okf { 50% { box-shadow: 0 0 0 4px var(--ok); } }
+@keyframes badf { 50% { box-shadow: 0 0 0 4px var(--bad); transform: translateX(4px); } }
+.misses { display: grid; gap: 8px; }
+.miss { padding: 10px 12px; border-radius: 14px; background: var(--surface-2); font-size: .88rem; }
+.miss b { display: block; }
+.hist { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; align-items: end; height: 90px; }
+.hist div { display: grid; gap: 4px; align-items: end; height: 100%; }
+.hist i { display: block; border-radius: 8px 8px 3px 3px; min-height: 4px; }
+.hist span { font-size: .66rem; color: var(--muted); text-align: center; line-height: 1.1; }
+.tagbars { display: grid; gap: 6px; }
+.tagbar { display: grid; grid-template-columns: 8.5em 1fr 3em; gap: 10px; align-items: center; font-size: .86rem; }
+.tagbar .bar { height: 10px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.tagbar .bar i { display: block; height: 100%; background: var(--fg); border-radius: 99px; }
+.tagbar .pct { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tagbar.yours .bar i { background: var(--link); }
+.form { display: grid; gap: 10px; }
+.form label { font-size: .85rem; font-weight: 600; display: grid; gap: 6px; }
+.form input[type=text], .form textarea { width: 100%; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: 400 .95rem var(--font-body); }
+.form textarea { min-height: 180px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .86rem; resize: vertical; }
+.form .hint code { background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.subtag { font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+
+.namebar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; }
+.namebar label { font-size: .82rem; font-weight: 600; }
+.namebar input { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: 400 .92rem var(--font-body); }
+.setup { margin: 0; padding: 12px 14px; border-radius: 14px; border: 1px dashed var(--line); color: var(--muted); font-size: .86rem; }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+[hidden] { display: none !important; }
+img { max-width: 100%; }
+
+/* ---------- review status ---------- */
+.review-card { display: grid; gap: 10px; justify-items: center; text-align: center; padding: 6px 0 4px; animation: rise .35s ease both; }
+.review-card h2 { margin: 0; font-family: var(--font-display); font-size: 1.2rem; }
+.review-card p { margin: 0; max-width: 42ch; }
+.review-card .im { width: 100%; text-align: left; }
+.review-card .row { width: 100%; }
+.review-icon { width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center; font-size: 1.9rem; background: color-mix(in srgb, var(--fire) 16%, transparent); animation: hourglass 2.4s ease-in-out infinite; }
+.review-icon.still { animation: none; background: color-mix(in srgb, var(--bad) 14%, transparent); }
+@keyframes hourglass { 0%, 40% { transform: rotate(0); } 50%, 90% { transform: rotate(180deg); } 100% { transform: rotate(360deg); } }
+.stchip { display: inline-block; font-size: .7rem; font-weight: 700; padding: 2px 8px; border-radius: 99px; vertical-align: 2px; margin-left: 4px; white-space: nowrap; }
+.st-pending { background: color-mix(in srgb, var(--fire) 18%, transparent); color: var(--fire); animation: pulse 1.8s ease-in-out infinite; }
+.st-approved { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.st-declined { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+@keyframes pulse { 50% { opacity: .55; } }
+.rq { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); transition: transform .4s ease, opacity .4s ease; }
+.rq:first-of-type { border-top: 0; }
+.rq-reason { width: 100%; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: 400 .9rem var(--font-body); }
+.rq-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rq-acc { background: var(--ok); color: #fff; }
+.rq-dec { background: var(--bad); color: #fff; }
+.rq-out-ok { transform: translateX(40px); opacity: 0; }
+.rq-out-no { transform: translateX(-40px); opacity: 0; }
+
+/* ---------- sound button ---------- */
+.iconbtn { cursor: pointer; font-size: 1rem; padding: 7px 11px; color: var(--fg); }
+.iconbtn:hover { border-color: var(--muted); }
+
+/* ---------- motion ---------- */
+.fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 40; }
+.pill.streak { position: relative; }
+.flameup { position: absolute; left: 50%; top: 0; font-size: 1.3rem; pointer-events: none; animation: flameup .9s ease-out forwards; }
+@keyframes flameup { from { transform: translate(-50%, 0) scale(.6); opacity: 1; } to { transform: translate(-50%, -46px) scale(1.4); opacity: 0; } }
+.pill.streak.hot #flames { display: inline-block; animation: flicker 1.2s ease-in-out infinite; transform-origin: 50% 90%; }
+@keyframes flicker { 0%, 100% { transform: scale(1) rotate(0); } 30% { transform: scale(1.12) rotate(-4deg); } 60% { transform: scale(.96) rotate(3deg); } }
+section[id^="view-"]:not([hidden]) { animation: viewIn .28s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes viewIn { from { opacity: 0; transform: translateY(8px); } }
+#mode-classic:not([hidden]), #mode-hl:not([hidden]), #mode-blitz:not([hidden]), #mode-crowd:not([hidden]) { animation: viewIn .3s cubic-bezier(.2,.8,.2,1) both; }
+.sheet .badge, .resultpanel .minibadge, .answer .badge { animation: badgePop .55s cubic-bezier(.3,1.6,.45,1) both .08s; }
+@keyframes badgePop { from { transform: scale(.3) rotate(-12deg); opacity: 0; } }
+.sheet .status, .resultpanel .status { animation: rise .4s cubic-bezier(.2,.9,.3,1.2) both .18s; }
+.sheet .tagnote { animation: rise .35s ease both; }
+.sheet .tagnote:nth-child(2) { animation-delay: .06s; } .sheet .tagnote:nth-child(3) { animation-delay: .12s; } .sheet .tagnote:nth-child(4) { animation-delay: .18s; }
+.compare .dot { transition: left .6s cubic-bezier(.2,.9,.3,1.2); animation: dotIn .6s cubic-bezier(.2,.9,.3,1.2) both .1s; }
+@keyframes dotIn { from { left: 50%; opacity: 0; } }
+.hist i { animation: grow .6s cubic-bezier(.2,.9,.3,1) both .15s; transform-origin: bottom; }
+@keyframes grow { from { transform: scaleY(0); } }
+.tagbar .bar i { animation: fill .7s cubic-bezier(.2,.9,.3,1) both .2s; transform-origin: left; }
+@keyframes fill { from { transform: scaleX(0); } }
+.zone { animation: zoneIn .45s cubic-bezier(.3,1.5,.5,1) both; }
+@keyframes zoneIn { from { opacity: 0; transform: scaleX(.4); } }
+.chip[aria-pressed="true"] { animation: chipPop .28s cubic-bezier(.3,1.7,.5,1); }
+@keyframes chipPop { 40% { transform: scale(1.12); } }
+.fbb[aria-pressed="true"] { animation: chipPop .3s cubic-bezier(.3,1.7,.5,1); }
+.btn:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--fg) 60%, transparent); }
+.btn:not(:disabled):active { transform: scale(.97); }
+.btn.fire:not(:disabled) { background-image: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.28) 50%, transparent 70%); background-size: 250% 100%; animation: shine 2.4s linear infinite; }
+@keyframes shine { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+.mcard { transition: transform .18s ease, border-color .15s; }
+.mcard:hover { transform: translateY(-3px); }
+.mcard:hover .mi { animation: wiggle .5s ease; }
+@keyframes wiggle { 30% { transform: rotate(-10deg) scale(1.1); } 60% { transform: rotate(8deg); } }
+#blitzPhone .im { animation: cardIn .25s cubic-bezier(.2,.9,.3,1.2) both; }
+@keyframes cardIn { from { opacity: 0; transform: translateX(40px) rotate(3deg); } }
+.pcol.won .im { animation: wonGlow 1.2s ease-in-out 2; }
+@keyframes wonGlow { 50% { box-shadow: 0 0 0 3px var(--ok), 0 0 28px 4px color-mix(in srgb, var(--ok) 45%, transparent); } }
+.item { transition: transform .15s ease, border-color .15s; }
+.item:hover { transform: translateX(3px); }
+.feed .item { animation: rise .3s ease both; }
+.toast { animation: toastIn .45s cubic-bezier(.2,1.4,.4,1) both; }
+@keyframes toastIn { from { opacity: 0; transform: translate(-50%, 20px) scale(.92); } }
+.dotcount { animation: badgePop .5s cubic-bezier(.3,1.6,.45,1) both; }
+.nav button { transition: background .2s, color .2s; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="top">
+    <div class="logo"><i></i>Red Flag Meter</div>
+    <div class="counters">
+      <button type="button" class="pill iconbtn" id="soundBtn" aria-label="Sound">🔊</button>
+      <div class="pill" id="bestPill"><small>Best</small><span id="best">0</span></div>
+      <div class="pill streak" id="streakPill" aria-label="Current streak"><span id="flames">🔥</span><span id="streak">0</span></div>
+    </div>
+  </div>
+
+  <nav class="nav" aria-label="Sections">
+    <button type="button" id="nav-play" data-view="play" aria-current="page">Play</button>
+    <button type="button" id="nav-modes" data-view="modes">Modes</button>
+    <button type="button" id="nav-comments" data-view="comments">History<span class="dotcount" id="notifBadge" hidden>0</span></button>
+    <button type="button" id="nav-learn" data-view="learn">Learn</button>
+    <button type="button" id="nav-insights" data-view="insights" hidden>Insights</button>
+  </nav>
+
+  <!-- INSIGHTS (owner only) -->
+  <section id="view-insights" class="wrap" hidden>
+    <div class="section" style="gap:6px"><div class="row" style="align-items:center"><h1 class="h1">Insights</h1><button type="button" class="small-btn ghost" id="refreshInsights">Refresh</button></div>
+      <p class="lead">Only someone with your admin key can see this. Players appear only as anonymous tags.</p></div>
+    <div id="insightsBody" class="wrap"></div>
+  </section>
+
+  <!-- PLAY -->
+  <section id="view-play" class="wrap">
+    <div class="modebar"><span class="mname" id="modeName">Classic Meter</span><button type="button" class="linkbtn" id="changeMode">Change mode</button></div>
+
+    <!-- Classic -->
+    <div id="mode-classic" class="wrap">
+      <div id="phone"></div>
+      <div id="classicRater"></div>
+      <div class="row" style="align-items:center">
+        <span class="hint">Keep the 🔥 alive: land close to the real color and pick at least one right tag.</span>
+        <span class="gen" id="genStatus" hidden><span class="spin"></span>Writing a new scenario</span>
+      </div>
+      <div class="dock"><button class="btn" id="lock" disabled>Lock it in</button></div>
+    </div>
+
+    <!-- Which is worse -->
+    <div id="mode-hl" class="wrap" hidden>
+      <p class="hint" style="margin:0">Which thread is more toxic? At least one of them always has red flags.</p>
+      <div class="pair">
+        <div class="pcol" id="hlColA"><div class="plabel"><b>A</b><span id="hlBadgeA"></span></div><div id="hlA"></div><button type="button" class="btn pickbtn" id="hlPickA">A is worse</button></div>
+        <div class="vs">VS</div>
+        <div class="pcol" id="hlColB"><div class="plabel"><b>B</b><span id="hlBadgeB"></span></div><div id="hlB"></div><button type="button" class="btn pickbtn" id="hlPickB">B is worse</button></div>
+      </div>
+      <div id="hlResult"></div>
+    </div>
+
+    <!-- Blitz -->
+    <div id="mode-blitz" class="wrap" hidden>
+      <div id="blitzStart" class="resultpanel">
+        <h2>Red or Green Blitz</h2>
+        <p class="muted">You get 60 seconds. Each thread is a clear red flag or a clear green flag. Tap fast. Wrong answers cost 3 seconds.</p>
+        <button type="button" class="btn" id="blitzGo">Start 60 seconds</button>
+      </div>
+      <div id="blitzRun" class="wrap" hidden>
+        <div class="blitzhud"><span><b id="blitzScore">0</b> <span class="hint">correct</span></span><span><b id="blitzTime">60</b><span class="hint">s</span></span></div>
+        <div class="timer"><i id="blitzBar" style="width:100%"></i></div>
+        <div id="blitzPhone"></div>
+        <div class="blitzbtns"><button type="button" class="red" id="blitzRed">🚩 Red flag</button><button type="button" class="green" id="blitzGreen">💚 Green flag</button></div>
+      </div>
+      <div id="blitzEnd" hidden></div>
+    </div>
+
+    <!-- Crowd verdict -->
+    <div id="mode-crowd" class="wrap" hidden>
+      <div class="row" style="align-items:center"><p class="hint" style="margin:0">No answer key. Rate it, then see what everyone else thinks.</p><button type="button" class="small-btn ghost" id="openSubmit">+ Add a text</button></div>
+      <div id="crowdPhone"></div>
+      <div id="crowdRater"></div>
+      <div class="dock"><button class="btn" id="crowdVote" disabled>Cast my vote</button></div>
+      <div id="crowdSubmit" class="resultpanel" hidden></div>
+    </div>
+  </section>
+
+  <!-- MODES -->
+  <section id="view-modes" class="wrap" hidden>
+    <div class="section" style="gap:6px"><h1 class="h1">Game modes</h1><p class="lead">Same texts, different ways to play.</p></div>
+    <div class="modes" id="modeCards"></div>
+  </section>
+
+  <!-- COMMENTS -->
+  <section id="view-comments" class="wrap" hidden>
+    <div id="commentsList" class="wrap" style="gap:14px">
+      <div class="namebar"><label for="nick">Your name</label><input type="text" id="nick" maxlength="20" placeholder="Shown on your comments"><button type="button" class="small-btn" id="saveNick">Save</button><span class="hint" id="nickMsg"></span></div>
+      <div class="subtabs" role="group" aria-label="History views">
+        <button type="button" id="sub-activity" data-sub="activity" aria-pressed="true">Activity</button>
+        <button type="button" id="sub-mine" data-sub="mine" aria-pressed="false">My comments</button>
+        <button type="button" id="sub-votes" data-sub="votes" aria-pressed="false">My votes</button>
+        <button type="button" id="sub-texts" data-sub="texts" aria-pressed="false">My texts</button>
+      </div>
+      <div class="feed" id="feed"></div>
+    </div>
+    <div id="commentsDetail" class="wrap" style="gap:14px" hidden></div>
+  </section>
+
+  <!-- LEARN -->
+  <section id="view-learn" class="wrap" hidden>
+    <div class="section" style="gap:8px">
+      <h1 class="h1">The red flag field guide</h1>
+      <p class="lead">What each tag means, what it sounds like over text, what the healthy version sounds like, and where to read more.</p>
+    </div>
+    <div class="gloss" id="gloss"></div>
+    <div class="panel">
+      <h3>Where the messages come from</h3>
+      <p><b>Written set.</b> Hand-written threads based on patterns people commonly post about on relationship forums like r/relationship_advice. They aren't copied from real people's messages.</p>
+      <p><b>Remixes.</b> The game builds new threads from parts: real-feeling situations, tactics, names, timestamps and read receipts. That's thousands of combinations, all free, and every remix is the same for everyone so comments and votes stick to it.</p>
+      <p><b>Player texts.</b> Anyone can add a text in Crowd Verdict. Each one is reviewed by the game's owner before it goes live. There's no answer key, so the crowd decides.</p>
+      <p><b>Reddit.</b> When a scenario is based on a specific Reddit post, a "From Reddit" link appears with it.</p>
+      <div class="statgrid"><div><b id="statBuilt">0</b><span>Written</span></div><div><b id="statRemix">0</b><span>Remixes</span></div><div><b id="statSubs">0</b><span>Player texts</span></div></div>
+    </div>
+    <div class="panel">
+      <h3>What the game saves</h3>
+      <p>The game gives your browser a random anonymous ID, so your votes, comments and history follow you on this device. No account, email or location is collected. To improve the game it saves your scores and answers in each mode, your feedback ratings, and whether you're on a phone or computer; only the game's owner sees those, as anonymous totals. Votes, comments, your chosen name and texts you add are shared with other players. Texts you add are reviewed by the owner before they go live. Clearing your browser data starts you over with a new ID.</p>
+    </div>
+    <div class="panel">
+      <h3>If a text in your real life looks like a 9 or 10</h3>
+      <p>Threats, demands for your location or passwords, and threats to share private photos are serious. Save the messages and talk to someone you trust. In the US you can reach the loveisrespect helpline by texting LOVEIS to 22522 or calling 1-866-331-9474.</p>
+    </div>
+  </section>
+
+  <p class="setup" id="setupNote" hidden>Owner: comments, votes and history are off until you paste your Worker URL into index.html. See the README.</p>
+  <p class="foot">Ratings are a guide, not a diagnosis.</p>
+</div>
+
+<div id="sheetHost"></div>
+<div id="toastHost"></div>
+
+<script>
+const SRC = {
+  gas:    { name: "What is gaslighting?", site: "Choosing Therapy", url: "https://www.choosingtherapy.com/gaslighting/" },
+  gastext:{ name: "The signs of gaslighting via text", site: "One Love Foundation", url: "https://www.joinonelove.org/learn/the-signs-of-gaslighting-via-text/" },
+  love:   { name: "Love bombing", site: "therapist.com", url: "https://therapist.com/relationships/love-bombing/" },
+  bread:  { name: "Breadcrumbing", site: "therapist.com", url: "https://therapist.com/relationships/breadcrumbing/" },
+  stone:  { name: "The Four Horsemen: Stonewalling", site: "Gottman Institute", url: "https://www.gottman.com/blog/the-four-horsemen-stonewalling/" },
+  abuse:  { name: "Forms of emotional abuse", site: "WomensLaw.org", url: "https://www.womenslaw.org/about-abuse/forms-abuse/emotional-and-psychological-abuse/forms-emotional-and-psychological-abuse-2" },
+  signs:  { name: "Signs of emotional abuse", site: "Psych Central", url: "https://psychcentral.com/blog/signs-of-emotional-abuse" },
+  coerce: { name: "When is love bombing coercive control?", site: "eSafety Commissioner", url: "https://esafety.gov.au/young-people/when-is-love-bombing-coercive-control" }
+};
+
+const TAG = {
+  "Gaslighting":        { def: "making you doubt your own memory, perception, or sanity", src: ["gas", "gastext"],
+    sounds: "\"That never happened.\" \"You're imagining things.\"", instead: "\"I remember it differently. Let's figure out what happened.\"" },
+  "Love bombing":       { def: "flooding you with affection, praise, or big commitments very early so you attach fast", src: ["love", "coerce"],
+    sounds: "\"You're my soulmate\" after a week. Lavish gifts right after a fight.", instead: "Interest that grows at the pace you both actually know each other." },
+  "Guilt tripping":     { def: "making you feel responsible for their feelings so you'll change what you do", src: ["signs"],
+    sounds: "\"After everything I've done for you.\" \"I'll just be alone then.\"", instead: "\"I'll miss you tonight. Have fun.\"" },
+  "Controlling":        { def: "trying to decide what you do, who you see, or what you share", src: ["abuse"],
+    sounds: "\"Share your location now.\" \"Send me screenshots.\"", instead: "\"I felt anxious. Can we talk about it?\"" },
+  "Jealousy":           { def: "treating your other connections as a threat and punishing you for them", src: ["abuse"],
+    sounds: "\"Why did you like his photo?\" \"Who were you texting?\"", instead: "\"I felt a little insecure seeing that. Can you reassure me?\"" },
+  "Isolation":          { def: "pulling you away from friends, family, or your support system", src: ["abuse"],
+    sounds: "\"Your friends are a bad influence.\" \"Your family hates me.\"", instead: "\"I don't click with her, but I'm glad you have her.\"" },
+  "Put-downs":          { def: "insults or digs meant to make you feel smaller", src: ["abuse"],
+    sounds: "\"Nobody else would put up with you.\" \"Kidding! Unless.\"", instead: "Teasing you're both in on, that stops when it lands wrong." },
+  "Blame shifting":     { def: "making you responsible for their own behavior", src: ["signs"],
+    sounds: "\"You made me yell.\" \"I only do it because you give me reasons.\"", instead: "\"I shouldn't have yelled. That's on me.\"" },
+  "Threats":            { def: "promising consequences to scare you into doing what they want", src: ["coerce", "abuse"],
+    sounds: "\"You'll regret this.\" \"I'll post your pics.\"", instead: "There isn't one. Save the messages and tell someone you trust." },
+  "Passive aggressive": { def: "saying one thing while signaling another, so the hostility stays deniable", src: ["signs"],
+    sounds: "\"I'm not mad 🙂\" \"Do whatever you want.\"", instead: "\"I'm a little upset. Can we talk later?\"" },
+  "Stonewalling":       { def: "shutting down or refusing to engage instead of working things out", src: ["stone"],
+    sounds: "\"lol ok\" Read receipts with no reply for days.", instead: "\"I need a break. I'll call you at 8.\"" },
+  "Breadcrumbing":      { def: "sending just enough attention to keep you interested, with no real follow-through", src: ["bread"],
+    sounds: "\"hey stranger 👀\" after weeks of nothing. Plans that never happen.", instead: "Following up on the plans they suggest." },
+  "Healthy":            { def: "clear, honest communication that respects both people", src: ["stone"],
+    sounds: "\"I felt hurt when… can we talk tonight?\"", instead: "This is the good version." }
+};
+const TAGS = Object.keys(TAG);
+
+/* Thread lines: "~Day time" separator · "> text" you · "< text" them · "!Read 9:41 PM" or "!Delivered" receipt */
+const BUILTIN = [
+  { id:"jordan", name:"Jordan", score:8, tags:["Gaslighting","Put-downs"],
+    msgs:["~Mon 6:02 PM","> are you still good for Saturday? my sister's party is at 7","< yeah for sure 👍","~Today 4:48 PM","> party's in 2 hours, you leaving soon?","!Read 4:50 PM","~Today 6:31 PM","> ?? you said you'd come","< I never said that. you're remembering it wrong again","< maybe get your memory checked lol"],
+    why:"Scroll up: they agreed on Monday. Denying it and then saying your memory is the problem is textbook gaslighting, and the \"lol\" turns it into a dig.",
+    notes:{ "Blame shifting":"Blame shifting is admitting something happened and handing you the blame. Here they deny the promise existed at all. Rewriting what happened is gaslighting.", "Passive aggressive":"Passive aggression keeps the hostility hidden. This is out in the open: a direct denial plus a direct insult.", "Stonewalling":"They ignored the 4:50 message, but then they answered. The bigger problem is what they said when they did." } },
+  { id:"sam", name:"Sam", score:1, tags:["Healthy"],
+    msgs:["~Today 4:12 PM","< hey I'm completely wiped from work","< can we push dinner to tomorrow? same time?","< I still really want to see you, I just won't be good company tonight","> no worries! tomorrow works","!Read 4:13 PM","< thank you ❤️ I'll book the table"],
+    why:"Early notice, a reason, a new plan, reassurance, and they follow through by booking. Cancelling isn't a red flag when it's handled like this.",
+    notes:{ "Breadcrumbing":"Breadcrumbing is attention with no follow-through. Sam names a new day and books the table.", "Stonewalling":"Sam replies within a minute and explains everything.", "Guilt tripping":"Nothing here makes you feel bad. Sam takes responsibility for the change." } },
+  { id:"alex", name:"Alex", score:7, tags:["Love bombing"],
+    msgs:["~Sep 2 8:15 PM","< it was so nice meeting you at Leah's tonight","> you too!","~Sep 6 11:40 PM","< I've never felt like this about anyone. ever.","> haha that's sweet","~Today 9:02 PM","< I know it's only been 9 days but you're my soulmate","< let's move in together next month 🥺"],
+    why:"Look at the dates: nine days from meeting to moving in. Love bombing builds intense attachment quickly, which makes it harder to step back later.",
+    notes:{ "Healthy":"Strong feelings aren't the problem; the speed is. Moving in after nine days skips actually getting to know each other.", "Controlling":"There's no demand or restriction yet. It's pressure through affection. It can turn into control later.", "Guilt tripping":"Nobody is being made to feel bad. The pressure comes from too much affection." } },
+  { id:"riley", name:"Riley", score:6, tags:["Guilt tripping","Passive aggressive"],
+    msgs:["~Today 7:05 PM","> heading to Maya's birthday dinner tonight, back around 11!","< Fine. Go have fun.","< I'll just sit here alone like always.","> you can come too?","< no it's fine. don't worry about me"],
+    why:"On the surface it says yes. Underneath, every line is built to make you feel bad for having plans. Even the invite gets turned down in a way that keeps the guilt going.",
+    notes:{ "Isolation":"Isolation is actively pulling you away from people. Riley doesn't criticize Maya or say no; they make you feel guilty for going. Repeated over time it can work like isolation.", "Controlling":"Riley never sets a rule. The pressure is emotional.", "Stonewalling":"Riley keeps replying. They're using the conversation to send guilt, not shutting it down." } },
+  { id:"casey", name:"Casey", score:8, tags:["Controlling","Jealousy"],
+    msgs:["~Today 8:15 AM","< I saw you were active at 2am","< who were you texting","> my cousin, she's in a different time zone","< send me screenshots of the whole convo or I'm assuming the worst"],
+    why:"You gave a straight answer and it wasn't enough. Demanding screenshots of your private messages is surveillance, not trust.",
+    notes:{ "Threats":"There's an ultimatum, but the consequence is just \"assuming the worst.\" The bigger pattern is control: demanding access to your messages.", "Gaslighting":"Casey isn't rewriting what happened. They're demanding proof.", "Healthy":"Feeling insecure is normal. Demanding screenshots isn't. A healthy version: \"I felt anxious seeing you up late, can we talk?\"" } },
+  { id:"morgan", name:"Morgan", score:2, tags:["Healthy"],
+    msgs:["~Today 7:40 PM","< hey, can I be honest with you about something?","> of course","< I think we should break up. I've been unhappy for a while and it isn't fair to either of us to keep pretending","< I'm really sorry. you deserve honesty, and I wanted to tell you before anything got worse"],
+    why:"Breakups hurt, but this one is honest, takes ownership, and doesn't blame you. A painful message isn't automatically a toxic one.",
+    notes:{ "Blame shifting":"Morgan says \"I've been unhappy\" and apologizes. That's taking responsibility.", "Guilt tripping":"Morgan explains their own feelings and apologizes. Nothing is aimed at making you feel guilty.", "Stonewalling":"Ending things with an explanation isn't stonewalling. Stonewalling is refusing to talk." } },
+  { id:"drew", name:"Drew", score:10, tags:["Threats"],
+    msgs:["~Today 10:12 PM","> I think I need some space for a while. I'm not okay with how things have been","!Read 10:12 PM","< you're going to regret this","< everyone's going to find out what you're really like"],
+    why:"Threatening to damage your reputation so you won't leave is coercion. Save messages like this and tell someone you trust.",
+    notes:{ "Guilt tripping":"Guilt trips make you feel bad. This is designed to make you scared.", "Blame shifting":"Drew implies you're the bad one, but the real move is the warning: \"everyone's going to find out.\"", "Put-downs":"There's a dig in \"what you're really like,\" but it's attached to a promise of exposure. The danger is the threat." } },
+  { id:"taylor", name:"Taylor", score:9, tags:["Blame shifting"],
+    msgs:["~Today 11:48 PM","> you really yelled at me in front of my roommate","< you MADE me yell at you","< if you didn't push my buttons we wouldn't even be fighting","> I asked where you were","< exactly. you never let anything go"],
+    why:"Asking a question became \"pushing buttons.\" They're making you responsible for their behavior. People choose how they react.",
+    notes:{ "Gaslighting":"Taylor admits the yelling happened, so they aren't rewriting reality. They're assigning the blame to you. It overlaps with gaslighting if you start believing you caused it.", "Guilt tripping":"Guilt trips work through their hurt feelings. This works through accusation.", "Threats":"There's no consequence promised, just blame." } },
+  { id:"jamie", name:"Jamie", score:4, tags:["Stonewalling","Passive aggressive"],
+    msgs:["~Today 9:30 PM","> I don't want to start a fight, but I feel like every time something's wrong we just pretend it isn't","> I just want us to actually talk about it instead of ignoring it every time","!Read 9:31 PM","~Today 11:57 PM","< lol ok"],
+    why:"Read in one minute, then two and a half hours later: \"lol ok.\" Brushing off a vulnerable message shuts the conversation down. Once is a bad moment; as a pattern it's stonewalling.",
+    notes:{ "Put-downs":"\"lol ok\" is dismissive, but there's no insult about you. The harm is the refusal to engage.", "Gaslighting":"Jamie doesn't deny anything or question your memory.", "Breadcrumbing":"Breadcrumbing keeps you hooked with small bits of attention. Jamie is closing the door." } },
+  { id:"avery", name:"Avery", score:5, tags:["Breadcrumbing"],
+    msgs:["~Sep 28 10:03 PM","> had a really fun time last night!","!Read Sep 28","~Oct 2 6:15 PM","> want to get food this week?","!Read Oct 2","~Today 1:12 AM","< hey stranger 👀","< been thinking about u","~Today 9:00 AM","> haha hey! free this weekend?","!Read 9:04 AM"],
+    why:"Two messages left on read for weeks, a flirty 1am ping, then read again with no answer. Just enough attention to keep you hooked, with no follow-through.",
+    notes:{ "Love bombing":"Love bombing is a flood of attention. This is a tiny crumb after weeks of nothing.", "Stonewalling":"The read receipts look like stonewalling, but there's no conflict being avoided. It's the on-off attention pattern of breadcrumbing.", "Healthy":"Reaching out isn't bad by itself. The pattern around it is." } },
+  { id:"quinn", name:"Quinn", score:1, tags:["Healthy"],
+    msgs:["~Yesterday 11:58 PM","< home safe, thanks for driving 🙂","~Today 10:20 AM","< hey, I felt really hurt when you joked about my job in front of everyone last night","< I'm not trying to start a fight. can we talk about it tonight?"],
+    why:"Quinn waited until morning, names a specific feeling and moment, doesn't attack you, and asks to talk. This is how conflict is supposed to go.",
+    notes:{ "Guilt tripping":"\"I felt hurt\" isn't a guilt trip. A guilt trip uses feelings as a weapon; Quinn is sharing one and asking to solve it together.", "Blame shifting":"Quinn points calmly at something you actually did. That's accountability.", "Passive aggressive":"Quinn says exactly what bothered them, the opposite of passive aggression." } },
+  { id:"reese", name:"Reese", score:9, tags:["Put-downs","Controlling"],
+    msgs:["~Today 8:44 PM","> I just think we should split chores more evenly","< honestly nobody else would put up with you the way I do","< you're lucky I stay"],
+    why:"A fair request got answered with \"nobody else would want you.\" That's meant to shrink your options so you stay quiet and stay.",
+    notes:{ "Gaslighting":"Reese isn't rewriting events; they're attacking your worth.", "Isolation":"Close, but Reese isn't cutting you off from people. They're convincing you that you have no other options.", "Guilt tripping":"It's \"you're lucky,\" not \"look how you hurt me.\"" } },
+  { id:"parker", name:"Parker", score:7, tags:["Isolation","Controlling"],
+    msgs:["~Today 5:30 PM","> Maya and I are getting brunch tomorrow!","< again?","< she's such a bad influence on you","< I'd feel a lot better if you just stopped hanging out with her"],
+    why:"Cutting you off from friends removes your support system. Isolation often starts with one \"bad influence.\"",
+    notes:{ "Jealousy":"There may be jealousy underneath, but the ask is to drop a friend. The result is isolation.", "Guilt tripping":"\"I'd feel better\" uses feelings, but the real ask is cutting off a friend.", "Healthy":"Sharing concern about a friend can be fine. Asking you to stop seeing them crosses the line." } },
+  { id:"skyler", name:"Skyler", score:5, tags:["Passive aggressive"],
+    msgs:["~Today 6:10 PM","> are you upset with me? you've been quiet since lunch","< I'm not mad.","> ok, want to get dinner?","< do whatever you want 🙂"],
+    why:"Saying one thing while clearly meaning another forces you to guess. The 🙂 is doing a lot of work.",
+    notes:{ "Stonewalling":"Skyler answers, just not honestly. That's a mixed signal, not a shutdown.", "Gaslighting":"\"I'm not mad\" isn't rewriting reality. It's a deniable way of being mad.", "Guilt tripping":"No \"after all I've done.\" It's cold, not guilt-heavy." } },
+  { id:"rowan", name:"Rowan", score:1, tags:["Healthy"],
+    msgs:["~Today 7:52 PM","> I just don't get why you'd say that to me","< I need a couple hours to cool off before we keep talking","< I'm not ignoring you. I'll call you at 8:30","~Today 8:31 PM","< calling now. I'm sorry about earlier"],
+    why:"A break with a clear time to come back, and they actually come back on time with an apology. That's the healthy version of space.",
+    notes:{ "Stonewalling":"Stonewalling is shutting down with no return. Rowan says when they'll be back and shows up at 8:31.", "Breadcrumbing":"Rowan follows through on the exact time." } },
+  { id:"blake", name:"Blake", score:8, tags:["Gaslighting","Put-downs"],
+    msgs:["~Today 9:05 PM","> that comment about my weight in front of your friends really hurt","< you're overreacting. it was a JOKE","< you're way too sensitive. this is why nobody takes you seriously"],
+    why:"Calling you \"too sensitive\" makes you doubt your own reaction, and then they add an insult on top.",
+    notes:{ "Blame shifting":"Blake makes it your fault, but the main tactic is telling you your feelings are wrong.", "Passive aggressive":"Nothing here is hidden. It's openly dismissive and openly insulting." } },
+  { id:"charlie", name:"Charlie", score:6, tags:["Guilt tripping"],
+    msgs:["~Today 3:22 PM","> I think I'm going to spend Thanksgiving with my family this year","< after everything I've done for you?","< wow. this is how you repay me"],
+    why:"Turning past kindness into a debt you owe is a guilt trip. Gifts and favors aren't a contract.",
+    notes:{ "Isolation":"Charlie isn't attacking your family or asking you to cut them off. They're making you feel guilty for choosing them.", "Controlling":"No rule or demand, just pressure through guilt.", "Blame shifting":"Charlie isn't excusing their own behavior; they're making yours feel ungrateful." } },
+  { id:"emerson", name:"Emerson", score:3, tags:["Healthy"],
+    msgs:["~Oct 15 9:40 PM","> I think breaking up was the right call. I hope you're okay","!Delivered","~Today 6:03 PM","< hey, sorry for going quiet. I muted you for a bit because I needed space, not because I didn't care","< I miss you though. want to grab coffee and talk honestly?"],
+    why:"\"Delivered\" but never read: they muted you. They come back, explain it, apologize, and ask to talk in person. Mostly healthy, though only you know whether reconnecting is good for you.",
+    notes:{ "Breadcrumbing":"A breadcrumb is vague. Emerson explains, apologizes, and proposes a real plan.", "Stonewalling":"Muting someone after a breakup to process isn't stonewalling, especially when they come back and explain it.", "Love bombing":"\"I miss you\" plus coffee is a small step, not a flood of affection." } },
+  { id:"hayden", name:"Hayden", score:8, tags:["Controlling","Jealousy"],
+    msgs:["~Today 3:10 PM","> at the library, phone's going on silent","~Today 3:51 PM","< ??","< answer me","< where are you","< share your location NOW"],
+    why:"You told them exactly where you'd be. Forty minutes later they're demanding your location. That's tracking, not concern.",
+    notes:{ "Threats":"It's aggressive, but no consequence is promised. The core move is demanding to know where you are.", "Healthy":"Worrying is normal. \"Share your location NOW\" isn't." } },
+  { id:"logan", name:"Logan", score:5, tags:["Guilt tripping","Passive aggressive"],
+    msgs:["~Today 5:45 PM","> I'm so sorry, my shift got extended, can we do tomorrow instead?","< it's fine, I'm used to being nobody's priority","< don't worry about me"],
+    why:"You apologized and offered a new day. Framing it as you abandoning them is meant to make you feel guilty without saying it directly.",
+    notes:{ "Stonewalling":"Logan keeps talking. The messages aim to make you feel bad, not to end the conversation.", "Put-downs":"The message puts Logan down, not you. It's self-pity used to create guilt." } },
+  { id:"kai", name:"Kai", score:8, tags:["Jealousy","Controlling"],
+    msgs:["~Today 12:14 PM","< why did you like his photo?","< unlike it","< now.","> it's literally my lab partner","!Read 12:15 PM"],
+    why:"Treating a like as a betrayal and ordering you to undo it is jealousy turned into control. Your explanation was read and ignored.",
+    notes:{ "Isolation":"Kai isn't telling you to drop this person yet. Right now it's policing your behavior.", "Threats":"It's an order, but no consequence is stated.", "Stonewalling":"The read-and-no-reply is part of it, but the main move is the order." } },
+  { id:"nico", name:"Nico", score:1, tags:["Healthy"],
+    msgs:["~Today 2:30 PM","> I GOT THE JOB","< WAIT","< CONGRATS!! I'm so proud of you, you worked so hard for this","< let's celebrate this weekend, my treat 🎉"],
+    why:"Genuine excitement and a plan to celebrate you. This is what support looks like.",
+    notes:{ "Love bombing":"Love bombing is overwhelming affection used to hook someone early. Celebrating a real win with a partner is support.", "Controlling":"Offering a plan isn't controlling. Nothing restricts you." } },
+  { id:"jules", name:"Jules", score:5, tags:["Put-downs","Passive aggressive"],
+    msgs:["~Today 8:20 PM","< ugh you're being sooo annoying today","> wow ok","< kidding!! unless 😂"],
+    why:"\"Kidding\" lets them insult you and deny it in the same breath. Once is teasing; constantly is a pattern.",
+    notes:{ "Gaslighting":"It's close, since \"kidding\" makes you second-guess being hurt. But Jules isn't rewriting events. It's a deniable dig.", "Stonewalling":"Jules is engaging, just with a jab." } },
+  { id:"ezra", name:"Ezra", score:9, tags:["Gaslighting","Blame shifting"],
+    msgs:["~Today 1:15 AM","> who's \"J 💕\" in your phone? I saw the texts","< I didn't cheat. you're just paranoid","< your ex messed you up, that's not my fault"],
+    why:"Instead of explaining what you saw, they say your perception is broken and blame your past. That's gaslighting plus blame shifting.",
+    notes:{ "Put-downs":"Calling you paranoid hurts, but the goal is to make you distrust what you saw.", "Stonewalling":"Ezra responds, just by attacking your judgment instead of answering." } },
+  { id:"mira", name:"Mira", score:2, tags:["Healthy"],
+    msgs:["~Today 9:12 PM","> heading to Dani's party across town!","< have fun!! text me when you're home so I know you got back safe ❤️","~Today 1:40 AM","> home 🙂","< yay goodnight 😴"],
+    why:"A safe-home check-in with no rules or suspicion is care. Compare it with Hayden demanding a location.",
+    notes:{ "Controlling":"Control would be \"don't go\" or \"share your location.\" A safe-home text is a common courtesy.", "Jealousy":"Nothing here questions who you're with." } },
+  { id:"dev", name:"Dev", score:6, tags:["Stonewalling"],
+    msgs:["~Wed 10:41 PM","> can we talk about last night? I hate leaving it like this","< I'm not doing this again.","~Thu 9:15 AM","> I'm not trying to fight, I just want to understand","!Read 9:20 AM","~Today 8:02 PM","> are we okay?","!Read 8:03 PM"],
+    why:"Wednesday to Friday: read, read, no replies. Shutting the conversation down and going silent leaves you no way to resolve anything.",
+    notes:{ "Passive aggressive":"Dev isn't hiding hostility behind nice words. They're refusing outright.", "Guilt tripping":"\"Again\" hints you're the problem, but the main harm is the shutdown.", "Healthy":"Needing a break is fine. Days of read receipts with no plan to come back is not a break.", "Breadcrumbing":"Breadcrumbing sends small bits of attention. Dev sends none." } },
+  { id:"rory", name:"Rory", score:7, tags:["Guilt tripping","Controlling"],
+    msgs:["~Today 9:45 PM","> exam's at 8am, I'm reviewing tonight","< if you really loved me you'd skip review and come over","< it's one night. your grades aren't more important than us"],
+    why:"\"If you really loved me\" turns your priorities into a loyalty test and pressures you to give up something important.",
+    notes:{ "Isolation":"Rory isn't separating you from people. They're pressuring you to choose them over your own goals.", "Love bombing":"This uses love as leverage, not flattery." } },
+  { id:"sasha", name:"Sasha", score:6, tags:["Isolation"],
+    msgs:["~Today 4:30 PM","> going to my parents' for dinner tonight","< your family doesn't even like me","< why do you keep going over there?"],
+    why:"Framing your family as against the relationship is a common first step in pulling someone away from their support.",
+    notes:{ "Jealousy":"There may be insecurity, but the effect is making you feel bad about seeing your family.", "Guilt tripping":"It creates guilt, but the target is your relationship with your family." } },
+  { id:"theo", name:"Theo", score:7, tags:["Love bombing","Controlling"],
+    msgs:["~Oct 9 7:30 PM","< had the best time tonight!!","~Today 10:02 AM","< I booked us flights to meet my parents!! we leave Friday","< already told my boss you're coming to the work dinner too 😍","> wait what? we've been dating 2 weeks","< I know!! isn't it amazing"],
+    why:"Huge gestures this early, made without asking you, and your hesitation gets steamrolled. Love bombing combined with deciding your time for you.",
+    notes:{ "Healthy":"Excitement is fine. Booking flights and committing your time without asking skips your consent.", "Guilt tripping":"No guilt yet. The pressure comes from big, hard-to-refuse gestures." } },
+  { id:"max", name:"Max", score:10, tags:["Threats"],
+    msgs:["~Today 11:20 PM","> I think we should break up","< do that and I'll post the pics you sent me"],
+    why:"Threatening to share private images is serious abuse and illegal in many places. Screenshot it and tell someone you trust right away.",
+    notes:{ "Controlling":"It's an attempt to control you, but it works through fear of a specific consequence. That makes it a threat.", "Blame shifting":"Nothing here blames you. It's a direct threat." } },
+  { id:"ari", name:"Ari", score:7, tags:["Stonewalling","Guilt tripping"],
+    msgs:["~Sat 1:12 AM","> back home, had so much fun tonight! night 💛","!Read 1:15 AM","~Sat 2:40 PM","> hey, are you mad?","!Read 2:41 PM","~Sun 6:00 PM","> I really don't know what I did","!Read 6:01 PM","~Today 9:10 AM","< oh so NOW you care"],
+    why:"Two days of read receipts while you ask what's wrong, then a line that makes it your fault for not caring. That's the silent treatment used as punishment.",
+    notes:{ "Passive aggressive":"\"Oh so NOW you care\" is sarcastic, but the bigger harm is two days of punishing silence.", "Blame shifting":"There's blame in the last line, but the pattern is silence used to make you anxious and guilty.", "Breadcrumbing":"Breadcrumbing is small doses of attention. This is attention withheld as punishment." } },
+  { id:"lennon", name:"Lennon", score:1, tags:["Healthy"],
+    msgs:["~Today 10:05 PM","> can I have your phone password? just in case","< I'd rather keep my phone private, same as I'd never ask for yours","< but if something's making you worried, I want to hear it. call?","> yeah ok","< calling 📞"],
+    why:"Lennon sets a boundary without attacking you and immediately opens the door to talk about what's behind the request. That's healthy.",
+    notes:{ "Stonewalling":"Saying no to a request isn't stonewalling. Lennon offers to talk right away.", "Controlling":"Keeping your own phone private is a boundary, not control. Control is deciding what the other person does.", "Passive aggressive":"Lennon says exactly what they mean." } },
+  { id:"sage", name:"Sage", score:6, tags:["Love bombing"],
+    msgs:["~Today 6:15 PM","> I'm not okay with you screaming at me like that","!Read 6:16 PM","~Today 10:30 PM","< I'm sorry babe","< I ordered you those headphones you wanted","< and I booked the cabin for your birthday. we're good now right? 🥺"],
+    why:"Gifts arrive instead of a real conversation about the screaming. Showering someone with gifts right after hurting them is love bombing used to reset the relationship.",
+    notes:{ "Healthy":"An apology is a good start. Gifts that replace talking about what happened, plus \"we're good now right?\", skip the accountability.", "Guilt tripping":"There's pressure in \"we're good now right?\", but it's built on gifts, not guilt.", "Gaslighting":"Sage doesn't deny the screaming happened. They're trying to buy past it." } },
+  { id:"jesse", name:"Jesse", score:8, tags:["Controlling"],
+    msgs:["~Today 1:30 PM","> I'm going to buy my own ticket for the concert","< you don't need to spend money on that","< just send me your card info and I'll handle all your purchases from now on","> I can buy a ticket lol","< it's easier if I manage it. trust me"],
+    why:"Taking over your money is one of the most serious forms of control, even when it's framed as helping.",
+    notes:{ "Healthy":"Offering to pay once can be kind. Taking control of all your purchases is not.", "Love bombing":"It sounds generous, but the goal is control of your money, not affection.", "Isolation":"It limits your independence, but it isn't about cutting you off from people." } },
+  { id:"rio", name:"Rio", score:6, tags:["Put-downs","Passive aggressive"],
+    msgs:["~Today 8:50 PM","< my ex texted me again lol","> oh ok","< she always knew how to make me laugh","< you used to be like that"],
+    why:"Bringing up an ex to compare you is a dig made deniable. It's designed to make you feel not good enough and a little insecure.",
+    notes:{ "Jealousy":"Rio is trying to make YOU jealous. The tag Jealousy is for when someone punishes you for your connections.", "Gaslighting":"Nothing here rewrites what happened. It's a comparison meant to sting.", "Healthy":"Mentioning an ex texted can be fine. Comparing you to them isn't." } },
+  { id:"noor", name:"Noor", score:1, tags:["Healthy"],
+    msgs:["~Today 7:45 AM","< you're being so dramatic, I'm leaving","~Today 12:10 PM","< I was wrong to snap at you this morning","< I was stressed about my exam but that's not your fault","< can I bring you lunch and say sorry properly?"],
+    why:"The morning message wasn't great, but Noor comes back, names what they did, doesn't blame you, and offers to make it right. Repair matters.",
+    notes:{ "Love bombing":"Lunch after an apology is a small gesture. Love bombing uses gifts to skip the apology; Noor gives the apology first.", "Put-downs":"\"Dramatic\" was a dig, and Noor takes it back. The thread as a whole shows repair.", "Blame shifting":"Noor says \"that's not your fault.\" That's the opposite of blame shifting." } },
+  { id:"kendall", name:"Kendall", score:5, tags:["Breadcrumbing"],
+    msgs:["~Sep 12 11:02 PM","< we should totally go to Japan together next summer","< and you'll meet my parents soon I promise","~Oct 3 5:20 PM","> are we still doing dinner Friday?","!Read Oct 3","~Today 10:48 PM","< sorry been crazy busy","< soon though 😘"],
+    why:"Big future plans, then three weeks of read receipts and a vague \"soon.\" Promises with no follow-through keep you waiting. That's breadcrumbing, sometimes called future faking.",
+    notes:{ "Love bombing":"The Japan talk sounds like love bombing, but there's no flood of attention. It's big promises followed by almost nothing.", "Stonewalling":"There's no conflict being avoided. It's on-off attention.", "Healthy":"Being busy is real. Ignoring a plan for three weeks and answering \"soon\" isn't communication." } },
+  { id:"cam", name:"Cam", score:8, tags:["Blame shifting","Gaslighting"],
+    msgs:["~Today 9:25 PM","> you promised you'd stop going through my phone","< I can't believe you're attacking me like this","< I only check because you give me reasons to","< honestly I'm the victim here"],
+    why:"Deny, attack, reverse: Cam turns your concern into an attack on them and casts themself as the victim. It flips blame and warps what's actually happening.",
+    notes:{ "Controlling":"Going through your phone is controlling, but this message is about dodging responsibility for it.", "Guilt tripping":"\"I'm the victim\" creates guilt, but the main move is reversing who did what.", "Jealousy":"Jealousy may drive the phone checking, but the message itself is about flipping blame." } }
+];
+
+/* ---------- Remix engine: free, endless scenarios built from parts ----------
+   A remix id ("r-kit-situation-name-seed") rebuilds the exact same thread for everyone,
+   so comments and crowd votes attach to it like any other text. */
+const R_NAMES = ["Avi","Bea","Cole","Dana","Eli","Fern","Gio","Hana","Ivy","Jace","Kira","Luca","Nate","Opal","Pia","Rafe","Sol","Tess","Uma","Vic","Wren","Yara","Zane","Remy","Indie","Bodhi","Lark","Milo","Nia","Ash","Blair","Cruz","Drew","Ellis","Flynn","Gray","Harper","Jude","Kit","Lou"];
+const R_FRIENDS = ["Maya","Dani","Priya","Jess","Leah","Sofia","Tara","Nina"];
+const R_GUYS = ["Marcus","Tyler","Ben","Omar","Jake","Leo"];
+const R_SITS = [
+  { key:"bday",   cat:"plans",    you:"heading to {friend}'s birthday dinner tonight, back around 11!", event:"{friend}'s birthday" },
+  { key:"brunch", cat:"plans",    you:"{friend} and I are getting brunch tomorrow!", event:"brunch with {friend}" },
+  { key:"trivia", cat:"plans",    you:"my coworkers invited me to trivia tonight, gonna go!", event:"trivia night" },
+  { key:"gnight", cat:"plans",    you:"girls' night at {friend}'s, I'll text you after 💅", event:"girls' night" },
+  { key:"game",   cat:"plans",    you:"going to the game with my roommates tonight 🏀", event:"the game" },
+  { key:"concert",cat:"plans",    you:"{friend} got us concert tickets for Saturday!!", event:"the concert" },
+  { key:"joke",   cat:"conflict", you:"it really hurt when you joked about me in front of your friends" },
+  { key:"dates",  cat:"conflict", you:"I feel like I'm always the one planning our dates" },
+  { key:"night",  cat:"conflict", you:"can we talk about what happened last night?" },
+  { key:"call",   cat:"conflict", you:"you said you'd call yesterday and didn't. I was kind of worried" },
+  { key:"rent",   cat:"conflict", you:"I think we should split rent more evenly" },
+  { key:"phone",  cat:"conflict", you:"I saw you went through my phone while I was in the shower" },
+  { key:"intern", cat:"news",     you:"I GOT THE INTERNSHIP", news:"an internship" },
+  { key:"drive",  cat:"news",     you:"I passed my driving test!!", news:"a driving test" },
+  { key:"show",   cat:"news",     you:"my photos got picked for the student show!!", news:"a student show" },
+  { key:"lib",    cat:"checkin",  you:"at the library, phone's going on silent 📚", place:"the library" },
+  { key:"work",   cat:"checkin",  you:"stuck late at work, home around 9", place:"work" },
+  { key:"cousin", cat:"checkin",  you:"at my cousin's, my battery's low", place:"your cousin's" },
+  { key:"movein", cat:"boundary", you:"I'm not ready to move in together yet" },
+  { key:"alone",  cat:"boundary", you:"I need a night to myself tonight, just really tired" },
+  { key:"pw",     cat:"boundary", you:"I'd rather keep my phone password private" },
+  { key:"none",   cat:"none",     you:"" }
+];
+/* seq tokens: "you" = situation opener · "~Day" = new day · "~+h" = a few hours later · "~+m" = ~40 min later · "!read" = read receipt · "< "/"> " lines */
+const R_KITS = [
+  { cats:["plans"], tags:["Guilt tripping","Passive aggressive"], score:6, seq:["you","< fine. go have fun","< I'll just sit here alone like always"],
+    why:"It says yes, but every word is built to make you feel bad for going.", notes:{ "Isolation":"{name} doesn't attack your friends or say no. The pressure is guilt. Repeated over time it can work like isolation.", "Controlling":"There's no rule or demand, only guilt." } },
+  { cats:["plans"], tags:["Guilt tripping"], score:5, seq:["you","< wow","< guess {event} matters more than me"],
+    why:"Turning normal plans into proof you don't care is a guilt trip.", notes:{ "Passive aggressive":"It's sulky, but the message openly says you're choosing the wrong thing. The goal is guilt.", "Jealousy":"{name} isn't suspicious of anyone. They want you to feel bad for going." } },
+  { cats:["plans"], tags:["Controlling"], score:8, seq:["you","< you're not going","< I already told you I don't like it","> it's just {event}","!read"],
+    why:"Telling you that you're not allowed to go, then reading your reply and ignoring it, is direct control over your time.", notes:{ "Stonewalling":"The read receipt stings, but the main move is the order: \"you're not going.\"", "Threats":"No consequence is named. It's a command, which is control." } },
+  { cats:["plans"], tags:["Jealousy","Controlling"], score:8, seq:["you","< who's going to be there","< is {guy} going? because if he is you're not"],
+    why:"Treating one person as a threat and banning you from going because of him is jealousy turned into control.", notes:{ "Isolation":"It's aimed at one person, out of jealousy. Isolation is about cutting you off from your support in general." } },
+  { cats:["plans"], tags:["Isolation"], score:7, seq:["you","< {friend} is such a bad influence on you","< I'd feel a lot better if you stopped seeing them"],
+    why:"Asking you to drop a friend removes part of your support system. Isolation often starts with one \"bad influence.\"", notes:{ "Jealousy":"There may be jealousy under it, but the ask is to cut someone off. That's isolation.", "Guilt tripping":"\"I'd feel better\" uses feelings, but the real ask is losing a friend." } },
+  { cats:["plans"], tags:["Isolation"], score:6, seq:["you","< you're always with your friends","< they don't even like me. why do you keep going?"],
+    why:"Framing your friends as against the relationship is a classic first step in pulling you away from them.", notes:{ "Guilt tripping":"It creates guilt, but the target is your friendships. That makes isolation the bigger flag." } },
+  { cats:["plans","checkin"], tags:["Controlling","Jealousy"], score:7, seq:["you","< ok but send me a pic every hour","< so I know you're actually there"],
+    why:"Needing hourly proof of where you are is monitoring, not trust.", notes:{ "Healthy":"A safe-home text is caring. Hourly photo proof is surveillance.", "Guilt tripping":"No guilt here. It's a demand for proof." } },
+  { cats:["plans"], tags:["Passive aggressive"], score:4, seq:["you","< k.","< have fun 🙂"],
+    why:"\"k.\" and a 🙂 say one thing and signal another. You're left guessing whether they're upset.", notes:{ "Stonewalling":"{name} is replying, just coldly. Stonewalling is refusing to engage.", "Guilt tripping":"There's no \"after all I do.\" It's cold, not guilt-heavy." } },
+  { cats:["plans"], tags:["Healthy"], score:1, seq:["you","< have fun!! 🎉","< text me when you're home safe ❤️"],
+    why:"Excited for you, and a safe-home check-in with no rules attached. That's care.", notes:{ "Controlling":"Control would be \"don't go\" or \"share your location.\" A safe-home text is a normal courtesy." } },
+  { cats:["plans"], tags:["Healthy"], score:3, seq:["you","< aw I was hoping to see you tonight","< but have fun! tomorrow?"],
+    why:"A little disappointment said honestly, followed by support and a new plan. Feelings aren't red flags.", notes:{ "Guilt tripping":"A guilt trip uses disappointment as a weapon. {name} names it once and moves on to \"have fun.\"", "Passive aggressive":"It's said directly, not hidden behind a 🙂." } },
+  { cats:["conflict"], tags:["Gaslighting"], score:8, seq:["you","< that never happened","< you're remembering it wrong again"],
+    why:"Denying events and blaming your memory is the core move of gaslighting. The word \"again\" suggests it's a pattern.", notes:{ "Blame shifting":"Blame shifting admits something happened and blames you for it. This denies it happened at all.", "Stonewalling":"{name} is engaging, just by rewriting reality." } },
+  { cats:["conflict"], tags:["Gaslighting","Put-downs"], score:8, seq:["you","< you're being dramatic","< you're way too sensitive. this is why nobody takes you seriously"],
+    why:"Calling you too sensitive makes you doubt your own reaction, and then it adds an insult.", notes:{ "Blame shifting":"It does make it your fault, but the main tactic is telling you your feelings are wrong.", "Passive aggressive":"Nothing here is hidden. It's openly dismissive." } },
+  { cats:["conflict"], tags:["Blame shifting"], score:8, seq:["you","< you made me act like that","< if you didn't push my buttons we wouldn't even be fighting"],
+    why:"{name} makes you responsible for their behavior. People choose how they react.", notes:{ "Gaslighting":"{name} doesn't deny what happened; they blame you for it. It overlaps with gaslighting if you start believing you caused it.", "Guilt tripping":"Guilt trips work through hurt feelings. This works through accusation." } },
+  { cats:["conflict"], tags:["Blame shifting","Gaslighting"], score:7, seq:["you","< wow so now you're attacking me","< honestly I'm the victim here"],
+    why:"Your concern gets reframed as an attack, and they cast themself as the victim. It flips blame and warps what's happening.", notes:{ "Guilt tripping":"\"I'm the victim\" creates guilt, but the main move is reversing who did what.", "Put-downs":"There's no insult. It's a role reversal." } },
+  { cats:["conflict"], tags:["Put-downs","Controlling"], score:9, seq:["you","< honestly nobody else would put up with you","< you're lucky I stay"],
+    why:"Telling you nobody else would want you is meant to shrink your options so you stay quiet and stay.", notes:{ "Gaslighting":"{name} isn't rewriting events; they're attacking your worth.", "Isolation":"Close, but {name} isn't cutting you off from people. They're convincing you that you have no options." } },
+  { cats:["conflict"], tags:["Stonewalling"], score:6, seq:["~Wed","you","< I'm not doing this again.","~Thu","> I'm not trying to fight, I just want to understand","!read","~Today","> are we okay?","!read"],
+    why:"Days of read receipts with no reply. Shutting the conversation down and going silent leaves you no way to resolve anything.", notes:{ "Passive aggressive":"{name} isn't hiding hostility behind nice words. They're refusing outright.", "Healthy":"Needing a break is fine. Days of silence with no plan to come back isn't a break.", "Breadcrumbing":"Breadcrumbing sends small bits of attention. {name} sends none." } },
+  { cats:["conflict"], tags:["Stonewalling","Passive aggressive"], score:4, seq:["you","!read","~+h","< lol ok"],
+    why:"Read right away, then hours later: \"lol ok.\" Brushing off something you cared about shuts the conversation down.", notes:{ "Put-downs":"\"lol ok\" is dismissive, but there's no insult about you.", "Gaslighting":"{name} doesn't deny anything or question your memory." } },
+  { cats:["conflict","boundary"], tags:["Threats"], score:10, seq:["you","< you're going to regret this","< everyone's going to find out what you're really like"],
+    why:"Threatening your reputation to make you back down is coercion. Save messages like this and tell someone you trust.", notes:{ "Guilt tripping":"Guilt trips make you feel bad. This is designed to make you scared.", "Put-downs":"There's a dig, but it's attached to a promise of exposure. The danger is the threat." } },
+  { cats:["conflict"], tags:["Guilt tripping"], score:6, seq:["you","< wow. after everything I've done for you","< fine, I'll just stop trying then"],
+    why:"Turning past effort into a debt, then threatening to stop trying, makes you feel guilty for raising a problem at all.", notes:{ "Threats":"\"I'll stop trying\" is pressure, but it's emotional, not a real consequence meant to scare you.", "Blame shifting":"{name} isn't excusing their behavior; they're making yours feel ungrateful." } },
+  { cats:["conflict"], tags:["Healthy"], score:1, seq:["you","< you're right. I'm sorry, that wasn't fair to you","< can we talk tonight? I want to fix it"],
+    why:"Owns it, apologizes without excuses, and asks to repair. That's what you want to see.", notes:{ "Love bombing":"A plain apology and a plan to talk isn't a flood of affection." } },
+  { cats:["conflict"], tags:["Healthy"], score:2, seq:["you","< I hear you. I need an hour to cool off so I don't say something I don't mean","< I'll call you at {call}"],
+    why:"A break with a clear time to come back is the healthy version of space.", notes:{ "Stonewalling":"Stonewalling has no return. {name} names a time.", "Passive aggressive":"{name} says exactly what's going on." } },
+  { cats:["news"], tags:["Put-downs"], score:6, seq:["you","< lol it's just {news}","< don't let it go to your head"],
+    why:"Shrinking your good news is a put-down. Partners are supposed to be on your side when things go well.", notes:{ "Passive aggressive":"It's not hidden. It's a direct dig at your win.", "Jealousy":"There might be envy under it, but the move is belittling you." } },
+  { cats:["news"], tags:["Guilt tripping","Passive aggressive"], score:5, seq:["you","< great so now you'll be too busy for me","< must be nice"],
+    why:"Your good news gets turned into something you did to them, with a sarcastic \"must be nice.\"", notes:{ "Put-downs":"It doesn't insult you directly. It makes your win about their feelings.", "Jealousy":"Jealousy here means punishing you for your connections. This is about your time." } },
+  { cats:["news"], tags:["Healthy"], score:1, seq:["you","< WAIT","< I'm so proud of you!!","< celebrating this weekend, my treat 🎉"],
+    why:"Real excitement and a plan to celebrate you. This is what support looks like.", notes:{ "Love bombing":"Celebrating a real win is support, not love bombing." } },
+  { cats:["checkin"], tags:["Controlling","Jealousy"], score:8, seq:["you","~+m","< ??","< answer me","< where are you","< share your location NOW"],
+    why:"You said where you'd be. Forty minutes later {name} is demanding your location. That's tracking, not concern.", notes:{ "Threats":"It's aggressive, but no consequence is promised.", "Healthy":"Worrying is normal. \"Share your location NOW\" isn't." } },
+  { cats:["checkin"], tags:["Healthy"], score:1, seq:["you","< ok! good luck 💪","< call me when you're done?"],
+    why:"Supportive, relaxed, and no demands. Healthy.", notes:{ "Controlling":"Asking you to call later is an invitation, not a rule." } },
+  { cats:["checkin"], tags:["Jealousy","Controlling"], score:7, seq:["you","< at {place}? with who","< send me a pic so I know you're not lying"],
+    why:"Assuming you're lying and demanding photo proof is jealousy plus monitoring.", notes:{ "Gaslighting":"{name} isn't rewriting events. They're demanding proof." } },
+  { cats:["boundary"], only:["movein"], tags:["Love bombing"], score:7, seq:["you","< but you're my soulmate","< I already picked out the apartment 🥺","< we're meant to be"],
+    why:"Huge declarations used to push past your no. Love bombing builds pressure through affection.", notes:{ "Healthy":"Strong feelings are fine. Using them to override your boundary isn't.", "Controlling":"It's heading there, but right now the pressure is affection, not rules." } },
+  { cats:["boundary"], only:["movein"], tags:["Threats"], score:9, seq:["you","< if you won't move in then we're done","< and I'll tell everyone why"],
+    why:"An ultimatum plus a threat to tell people about you is coercion meant to override your boundary.", notes:{ "Guilt tripping":"This isn't about making you feel bad. It's about making you scared of consequences." } },
+  { cats:["boundary"], only:["alone"], tags:["Guilt tripping","Passive aggressive"], score:5, seq:["you","< wow so you'd rather be alone than with me","< ok"],
+    why:"A normal need for rest gets treated as rejection, with a cold \"ok\" to drive it home.", notes:{ "Stonewalling":"{name} is still replying. The point is guilt." } },
+  { cats:["boundary"], only:["pw"], tags:["Controlling","Jealousy"], score:8, seq:["you","< why, what are you hiding?","< if you had nothing to hide you'd give it to me"],
+    why:"\"If you had nothing to hide\" turns privacy into guilt. Demanding access to your phone is control.", notes:{ "Gaslighting":"{name} isn't denying events. They're demanding access.", "Guilt tripping":"It uses guilt, but the goal is access to your phone. That's control." } },
+  { cats:["boundary"], only:["alone","movein"], tags:["Healthy"], score:1, seq:["you","< totally fair, take the time you need","< I'm here whenever ❤️"],
+    why:"Respects your boundary right away with no guilt attached.", notes:{ "Passive aggressive":"\"Take the time you need\" with a ❤️ isn't sarcastic here. Nothing else in the thread suggests a hidden meaning." } },
+  { cats:["boundary"], only:["pw"], tags:["Healthy"], score:2, seq:["you","< that's fair, I wouldn't want to give mine either","< I just get anxious sometimes. can we talk about that?"],
+    why:"Accepts the boundary and is honest about their own anxiety. That's healthy communication.", notes:{ "Controlling":"{name} accepts the no and talks about their feelings instead." } },
+  { cats:["none"], tags:["Breadcrumbing"], score:5, seq:["~Sep 28","> had a really fun time last night!","!read","~Oct 2","> want to get food this week?","!read","~Today","< hey stranger 👀","< been thinking about u","> haha hey! free this weekend?","!read"],
+    why:"Weeks of read receipts, a flirty ping, then read again with no answer. Just enough attention to keep you hooked.", notes:{ "Love bombing":"Love bombing is a flood of attention. This is a tiny crumb after weeks of nothing.", "Stonewalling":"No conflict is being avoided. It's on-off attention." } },
+  { cats:["none"], tags:["Breadcrumbing"], score:5, seq:["~Sep 12","< we should totally go to Japan together next summer","< and you'll meet my parents soon I promise","~Oct 3","> are we still doing dinner Friday?","!read","~Today","< sorry been crazy busy","< soon though 😘"],
+    why:"Big future promises, then weeks of silence and a vague \"soon.\" That's breadcrumbing, sometimes called future faking.", notes:{ "Love bombing":"The Japan talk sounds big, but there's no flood of attention, just promises with nothing behind them.", "Healthy":"Being busy is real. Ignoring a plan for weeks isn't communication." } }
+];
+
+function hashStr(s){ let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rngFrom(seed){ let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const kitFits = (k, s) => k.cats.includes(s.cat) && (!k.only || k.only.includes(s.key));
+function fmtTime(mins){ mins = ((mins % 1440) + 1440) % 1440; let h = Math.floor(mins / 60), m = mins % 60; const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${ap}`; }
+const START = { plans: [16, 19], conflict: [19, 22], news: [11, 17], checkin: [13, 16], boundary: [18, 21], none: [18, 22] };
+
+function buildRemix(id){
+  const m = /^r-(\d+)-(\d+)-(\d+)-(\d+)$/.exec(id); if (!m) return null;
+  const k = R_KITS[+m[1]], s = R_SITS[+m[2]], name = R_NAMES[+m[3]];
+  if (!k || !s || !name || !kitFits(k, s)) return null;
+  const rnd = rngFrom(hashStr(id));
+  const pick = arr => arr[Math.floor(rnd() * arr.length)];
+  const friend = pick(R_FRIENDS), guy = pick(R_GUYS);
+  const [h0, h1] = START[s.cat] || [18, 21];
+  let t = (h0 + Math.floor(rnd() * (h1 - h0 + 1))) * 60 + Math.floor(rnd() * 60);
+  const fill = str => str.replace(/\{friend\}/g, friend).replace(/\{guy\}/g, guy).replace(/\{event\}/g, (s.event || "that").replace(/\{friend\}/g, friend))
+    .replace(/\{news\}/g, s.news || "that").replace(/\{place\}/g, s.place || "there").replace(/\{name\}/g, name).replace(/\{call\}/g, fmtTime(Math.round((t + 60) / 15) * 15));
+  const msgs = []; let day = "Today", needDivider = true;
+  const divider = () => { msgs.push(`~${day} ${fmtTime(t)}`); needDivider = false; };
+  for (const tok of k.seq) {
+    if (tok === "~+h") { t += 120 + Math.floor(rnd() * 90); needDivider = true; continue; }
+    if (tok === "~+m") { t += 35 + Math.floor(rnd() * 15); needDivider = true; continue; }
+    if (tok.startsWith("~")) { day = tok.slice(1); t = (h0 + Math.floor(rnd() * (h1 - h0 + 1))) * 60 + Math.floor(rnd() * 60); needDivider = true; continue; }
+    if (needDivider) divider();
+    if (tok === "!read") { t += 1 + Math.floor(rnd() * 4); msgs.push(`!Read ${fmtTime(t)}`); continue; }
+    if (tok === "you") { if (s.you) msgs.push("> " + fill(s.you)); t += 1 + Math.floor(rnd() * 2); continue; }
+    msgs.push(fill(tok)); t += Math.floor(rnd() * 3);
+  }
+  const notes = {}; for (const [tag, v] of Object.entries(k.notes || {})) notes[tag] = fill(v);
+  return { id, name, score: k.score, tags: k.tags.slice(), msgs, why: fill(k.why), notes, remix: true };
+}
+function randomRemixId(rand = Math.random){
+  for (let i = 0; i < 40; i++) {
+    const ki = Math.floor(rand() * R_KITS.length), k = R_KITS[ki];
+    const fits = R_SITS.map((s, i2) => [s, i2]).filter(([s]) => kitFits(k, s));
+    if (!fits.length) continue;
+    const si = fits[Math.floor(rand() * fits.length)][1];
+    const ni = Math.floor(rand() * R_NAMES.length);
+    return `r-${ki}-${si}-${ni}-0`;
+  }
+  return "r-0-0-0-0";
+}
+const REMIX_COUNT = R_KITS.reduce((n, k) => n + R_SITS.filter(s => kitFits(k, s)).length, 0) * R_NAMES.length;
+
+/* ---------- helpers ---------- */
+const $ = id => document.getElementById(id);
+const hue = n => n <= 5 ? 140 - (n - 1) * 22.5 : 50 - (n - 5) * 10;
+const posOf = score => (score - 1) / 9 * 100;
+const colorAt = p => `hsl(${hue(1 + p * 9 / 100).toFixed(1)} 72% var(--lum))`;
+const ZONES = ["Healthy", "Mostly fine", "Iffy", "Toxic", "Run"];
+const zoneIdx = p => Math.min(4, Math.floor(p / 20));
+const zoneName = p => ZONES[zoneIdx(p)];
+const xAt = p => `calc(17px + (100% - 34px) * ${p / 100})`;
+const TOL = 13;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+const GRADIENT = `linear-gradient(90deg, ${Array.from({ length: 11 }, (_, k) => colorAt(k * 10) + " " + (k * 10) + "%").join(", ")})`;
+const rand = arr => arr[Math.floor(Math.random() * arr.length)];
+function shuffle(a){ a = a.slice(); for (let k = a.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [a[k], a[j]] = [a[j], a[k]]; } return a; }
+function ago(ms){
+  const s = Math.max(1, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return "just now"; const m = Math.round(s / 60); if (m < 60) return m + "m ago";
+  const h = Math.round(m / 60); if (h < 24) return h + "h ago"; const d = Math.round(h / 24); return d < 30 ? d + "d ago" : new Date(ms).toLocaleDateString();
+}
+/* ---------- bad-word filter: replaces each bad word with asterisks ---------- */
+/* Slurs only. Everyday swearing is left alone. */
+const BAD_ANY = ["nigger","niggr","niggur","faggot","fagot","wetback","tranny","trannie","towelhead","raghead","sandnigger","beaner","kike"];
+const BAD_EXACT = new RegExp("^(?:" + ["fag","spic","chink","dyke","coon","gook","paki","retard","retarded","negro","jigaboo","zipperhead","golliwog","wop","kyke"].join("|") + ")(?:s|es)?$");
+const LEET = { "0":"o","1":"i","!":"i","3":"e","4":"a","@":"a","5":"s","$":"s","7":"t","+":"t","8":"b" };
+function isBad(word){
+  const n = word.toLowerCase().replace(/[01!3457@$+8]/g, c => LEET[c]).replace(/[^a-z]/g, "");
+  if (!n) return false;
+  const variants = [n, n.replace(/(.)\1{2,}/g, "$1"), n.replace(/(.)\1{2,}/g, "$1$1")];
+  return variants.some(v => BAD_EXACT.test(v) || BAD_ANY.some(b => v.includes(b)));
+}
+const censor = s => String(s).replace(/[\p{L}\p{N}@$](?:[\p{L}\p{N}@$!*.]*[\p{L}\p{N}@$])?/gu, w => isBad(w) ? "*".repeat(w.length) : w);
+
+function store(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+function load(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function toast(text, onClick){
+  const host = $("toastHost"); host.innerHTML = "";
+  const t = document.createElement("button"); t.type = "button"; t.className = "toast"; t.textContent = text;
+  t.onclick = () => { host.innerHTML = ""; if (onClick) onClick(); };
+  host.appendChild(t); clearTimeout(toast._t); toast._t = setTimeout(() => { if (host.contains(t)) host.innerHTML = ""; }, 5000);
+}
+
+/* ---------- scenario registry ---------- */
+const BY_ID = new Map(BUILTIN.map(t => [t.id, t]));
+const fresh = new Map();        // AI-written, shared library
+const subs = new Map();         // player-submitted texts
+const remixCache = new Map();
+function scen(id){
+  if (!id) return null;
+  if (BY_ID.has(id)) return BY_ID.get(id);
+  if (subs.has(id)) return subs.get(id);
+  if (fresh.has(id)) return fresh.get(id);
+  if (id.startsWith("r-")) { if (!remixCache.has(id)) remixCache.set(id, buildRemix(id)); return remixCache.get(id); }
+  return null;
+}
+function newRemix(){ for (let i = 0; i < 20; i++) { const id = randomRemixId().replace(/-0$/, "-" + Math.floor(Math.random() * 10)); const t = scen(id); if (t) return t; } return BUILTIN[0]; }
+function randomScored(){ const r = Math.random(); if (r < 0.1 && fresh.size) return rand([...fresh.values()]); return r < 0.5 ? rand(BUILTIN) : newRemix(); }
+function lastThem(t){ const m = [...t.msgs].reverse().find(x => x.startsWith("< ")); return m ? m.slice(2) : ""; }
+function cleanStr(s, max){ return typeof s === "string" ? s.replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max) : ""; }
+function cleanMsgs(arr){ return (Array.isArray(arr) ? arr : []).map(m => cleanStr(m, 240).replace(/^([<>])(?=\S)/, "$1 ")).filter(m => /^(~|!|> |< )/.test(m) && m.replace(/^(~|!|> |< )/, "").trim()).slice(0, 24); }
+const cleanName = s => cleanStr(s, 18).replace(/[^\p{L}\p{N} '.-]/gu, "").trim();
+
+/* ---------- iMessage rendering ---------- */
+const ICON_BACK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>`;
+const ICON_CHEV = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>`;
+const ICON_CAM = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h8A2.5 2.5 0 0 1 16 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-8A2.5 2.5 0 0 1 3 16.5v-9zm14.5 2.2 3-2.1c.7-.5 1.5 0 1.5.8v7.2c0 .8-.8 1.3-1.5.8l-3-2.1V9.7z"/></svg>`;
+const onlyEmoji = s => /^\p{Extended_Pictographic}[\p{Extended_Pictographic}‍️\s]{0,6}$/u.test(s.trim());
+function threadHTML(msgs){
+  const items = msgs.map(raw => {
+    if (raw.startsWith("~")) { const s = raw.slice(1).trim(); const i = s.search(/\s\d{1,2}:\d/); return { k: "time", day: i > 0 ? s.slice(0, i) : s, time: i > 0 ? s.slice(i + 1) : "" }; }
+    if (raw.startsWith("!")) { const s = raw.slice(1).trim(); const [w, ...rest] = s.split(" "); return { k: "rcpt", w, rest: rest.join(" ") }; }
+    if (raw.startsWith("> ")) return { k: "you", text: raw.slice(2) };
+    return { k: "them", text: raw.replace(/^<\s?/, "") };
+  });
+  let out = "", delay = 0, prev = null;
+  items.forEach((it, i) => {
+    if (it.k === "time") { out += `<div class="im-time"><b>${esc(it.day)}</b> ${esc(it.time)}</div>`; prev = null; return; }
+    if (it.k === "rcpt") { out += `<div class="rcpt"><b>${esc(it.w)}</b> ${esc(it.rest)}</div>`; return; }
+    const nxt = items[i + 1], tail = !nxt || nxt.k !== it.k, gap = prev && prev !== it.k;
+    out += `<div class="b ${it.k}${tail ? " tail" : ""}${gap ? " gap" : ""}${onlyEmoji(it.text) ? " emoji" : ""}" style="animation-delay:${(delay++ * 0.05).toFixed(2)}s">${esc(it.text)}</div>`;
+    prev = it.k;
+  });
+  return out;
+}
+function phoneHTML(t, opts = {}){
+  const label = t.player ? `<span class="im-tag">Player text</span>` : t.fresh ? `<span class="im-tag">AI</span>` : t.remix ? `<span class="im-tag">Remix</span>` : "";
+  const reddit = t.reddit ? `<a href="${esc(t.reddit.url)}" target="_blank" rel="noopener" style="font-size:.74rem">From Reddit ↗</a>` : "";
+  return `<section class="im${opts.compact ? " compact" : ""}" aria-label="iMessage thread with ${esc(t.name)}">
+    <div class="im-head">
+      <div class="im-back">${ICON_BACK}<span class="ccount"></span></div>
+      <div class="im-who"><div class="im-av">${esc((t.name[0] || "?").toUpperCase())}</div><div class="im-name">${esc(t.name)}${ICON_CHEV}</div></div>
+      <div class="im-cam">${label}${reddit}${ICON_CAM}</div>
+    </div>
+    <div class="im-body">${threadHTML(t.msgs)}</div>
+    <div class="im-input" aria-hidden="true"><div class="im-plus">+</div><div class="im-field">iMessage</div></div>
+  </section>`;
+}
+
+/* ---------- rater (color slider + tags) ---------- */
+function makeRater(host, prefix, onChange){
+  host.innerHTML = `
+    <section class="section">
+      <div class="row"><span class="label">How toxic is it?</span><span class="pick" id="${prefix}-pick"><i></i>Drag to a color</span></div>
+      <div class="slider untouched" id="${prefix}-slider"><div class="track" style="background:${GRADIENT}"></div>
+        <input type="range" id="${prefix}-tox" min="0" max="100" step="1" value="50" aria-label="Toxicity, from healthy green to red"></div>
+      <div class="ends"><span>Healthy</span><span>Mostly fine</span><span>Iffy</span><span>Toxic</span><span>Run</span></div>
+    </section>
+    <section class="section" style="margin-top:18px">
+      <div class="row"><span class="label">What's happening</span><span class="hint">Pick one or more</span></div>
+      <div class="chips" id="${prefix}-chips"></div>
+      <p class="defline" id="${prefix}-def">Hover or tap a tag to see what it means.</p>
+    </section>`;
+  const R = { guess: null, picked: new Set(), locked: false };
+  const sl = $(prefix + "-slider"), input = $(prefix + "-tox"), chips = $(prefix + "-chips"), def = $(prefix + "-def"), pick = $(prefix + "-pick");
+  const showDef = tag => { def.innerHTML = `<b>${esc(tag)}:</b> ${esc(TAG[tag].def)}.`; };
+  input.addEventListener("input", () => {
+    if (R.locked) return;
+    R.guess = +input.value; sl.classList.remove("untouched"); sl.style.setProperty("--thumb", colorAt(R.guess));
+    pick.innerHTML = `<i style="background:${colorAt(R.guess)}"></i>${zoneName(R.guess)}`; onChange();
+  });
+  TAGS.forEach(tag => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.id = `${prefix}-tag-${tag.replace(/\W+/g, "-").toLowerCase()}`;
+    b.textContent = tag; b.dataset.tag = tag; b.dataset.def = TAG[tag].def;
+    b.setAttribute("aria-pressed", "false"); b.setAttribute("aria-description", TAG[tag].def);
+    b.onmouseenter = () => showDef(tag); b.onfocus = () => showDef(tag);
+    b.onclick = () => {
+      showDef(tag); if (R.locked) return;
+      if (R.picked.has(tag)) R.picked.delete(tag);
+      else { if (tag === "Healthy") R.picked.clear(); else R.picked.delete("Healthy"); R.picked.add(tag); }
+      [...chips.children].forEach(x => x.setAttribute("aria-pressed", String(R.picked.has(x.dataset.tag)))); onChange();
+    };
+    chips.appendChild(b);
+  });
+  R.reset = () => {
+    R.guess = null; R.picked = new Set(); R.locked = false;
+    sl.classList.add("untouched"); sl.classList.remove("revealed"); sl.style.removeProperty("--thumb");
+    sl.querySelectorAll(".zone, .flag").forEach(n => n.remove());
+    input.value = 50; pick.innerHTML = `<i></i>Drag to a color`;
+    [...chips.children].forEach(x => x.setAttribute("aria-pressed", "false"));
+    def.textContent = "Hover or tap a tag to see what it means."; onChange();
+  };
+  R.lock = () => { R.locked = true; sl.classList.add("revealed"); };
+  R.markZone = (center, label) => {
+    const lo = Math.max(0, center - TOL), hi = Math.min(100, center + TOL);
+    sl.insertAdjacentHTML("beforeend", `<div class="zone" style="left:calc(${xAt(lo)} - 17px);width:calc((100% - 34px) * ${(hi - lo) / 100} + 34px)"></div><div class="flag" style="left:${xAt(center)}">${esc(label)}</div>`);
+  };
+  return R;
+}
+
+/* ---------- views + modes ---------- */
+let view = "play", mode = load("rfm-mode") || "classic";
+const MODES = {
+  classic: { name: "Classic Meter", icon: "🔥", tint: 0,   desc: "Slide to the color you think a thread deserves and name the tactic. Keep your streak alive." },
+  hl:      { name: "Which Is Worse?", icon: "⚖️", tint: 35, desc: "Two threads, one choice. Pick the more toxic one. Higher or lower, until you miss." },
+  blitz:   { name: "Red or Green Blitz", icon: "⏱️", tint: 50, desc: "60 seconds. Clear red flags and clear green flags. Tap as fast as you can." },
+  crowd:   { name: "Crowd Verdict", icon: "👥", tint: 140, desc: "No answer key. Rate a thread and see the crowd's average color and top tags. Add your own texts." }
+};
+if (!MODES[mode]) mode = "classic";
+function showView(v){
+  view = v;
+  ["play", "modes", "comments", "learn", "insights"].forEach(n => { $("view-" + n).hidden = n !== v; $("nav-" + n).setAttribute("aria-current", n === v ? "page" : "false"); });
+  if (v === "comments" && !detailId) renderFeed();
+  if (v === "insights") renderInsights();
+  if (v === "learn") renderStats();
+  if (v === "modes") renderModeCards();
+  if (v !== "play") blitzStop(false);
+  if (v === "play" && activeTextId()) watchThread(activeTextId());
+  window.scrollTo({ top: 0 });
+}
+document.querySelectorAll(".nav button").forEach(b => b.onclick = () => showView(b.dataset.view));
+$("changeMode").onclick = () => showView("modes");
+function setMode(m){
+  mode = m; store("rfm-mode", m); track(d => d.modes[m].opens++);
+  Object.keys(MODES).forEach(k => $("mode-" + k).hidden = k !== m);
+  $("modeName").textContent = MODES[m].name;
+  blitzStop(false);
+  if (m === "classic" && !classic.current) classicNext();
+  if (m === "hl" && !hl.a) hlNew();
+  if (m === "blitz") blitzReset();
+  if (m === "crowd" && !crowd.current) crowdNext();
+  paintTop(); showView("play");
+}
+function renderModeCards(){
+  $("modeCards").innerHTML = "";
+  Object.entries(MODES).forEach(([k, M]) => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "mcard"; b.id = "mode-card-" + k;
+    b.setAttribute("aria-current", String(k === mode));
+    const stat = k === "crowd" ? `${crowd.votes} vote${crowd.votes === 1 ? "" : "s"} cast` : `Best: ${bestOf(k)}`;
+    b.innerHTML = `<div class="mi" style="background:color-mix(in srgb, hsl(${M.tint} 72% var(--lum)) 22%, transparent)">${M.icon}</div><div><b>${esc(M.name)}</b><span>${esc(M.desc)}</span><small>${stat}</small></div>`;
+    b.onclick = () => setMode(k);
+    $("modeCards").appendChild(b);
+  });
+}
+const bestOf = m => +load("rfm-best-" + m) || (m === "classic" ? +load("rfm-best") || 0 : 0);
+function setBest(m, v){ if (v > bestOf(m)) store("rfm-best-" + m, String(v)); }
+function flames(n){ return n >= 10 ? "🔥🔥🔥" : n >= 5 ? "🔥🔥" : "🔥"; }
+function paintTop(bump){
+  const sp = $("streakPill"), bp = $("bestPill");
+  if (mode === "crowd") { bp.hidden = true; sp.hidden = false; $("flames").textContent = "🗳️"; $("streak").textContent = crowd.votes; sp.classList.remove("hot"); return; }
+  bp.hidden = false; $("best").textContent = bestOf(mode);
+  if (mode === "blitz") { sp.hidden = true; return; }
+  sp.hidden = false;
+  const s = mode === "hl" ? hl.streak : classic.streak;
+  $("flames").textContent = flames(s); $("streak").textContent = s; sp.classList.toggle("hot", s >= 3);
+  if (bump) { sp.classList.remove("bump"); void sp.offsetWidth; sp.classList.add("bump"); }
+}
+function activeTextId(){ return mode === "classic" ? classic.current && classic.current.id : mode === "crowd" ? crowd.current && crowd.current.id : null; }
+
+/* ---------- shared result bits ---------- */
+function whyNot(tag, t){
+  if (t.notes && t.notes[tag]) return t.notes[tag];
+  const main = t.tags[0];
+  if (main === "Healthy") return `${tag} means ${TAG[tag].def}. This thread does the opposite. ${t.why}`;
+  if (tag === "Healthy") return `There are real red flags here, so it isn't healthy. The main issue is ${t.tags.join(" and ").toLowerCase()}: ${TAG[main].def}.`;
+  return `${tag} means ${TAG[tag].def}. Nothing in this thread does that. The real move is ${main.toLowerCase()}, which is ${TAG[main].def}.`;
+}
+function sourceLinks(t, extraTags){
+  const links = [];
+  if (t.reddit) links.push({ name: t.reddit.title || "Original post", site: "Reddit", url: t.reddit.url });
+  const keys = new Set(); [...(t.tags || []), ...(extraTags || [])].forEach(tag => (TAG[tag] && TAG[tag].src || []).forEach(k => keys.add(k)));
+  keys.forEach(k => links.push(SRC[k]));
+  return links.length ? `<div class="sources">${links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener"><span>${esc(l.name)}</span><span>${esc(l.site)} ↗</span></a>`).join("")}</div>` : "";
+}
+function openSheet(html){ $("sheetHost").innerHTML = `<div class="scrim"></div><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="resTitle"><div class="grabber"></div>${html}</div>`; document.body.style.overflow = "hidden"; }
+function closeSheet(){ $("sheetHost").innerHTML = ""; document.body.style.overflow = ""; mounted = null; }
+const sheetOpen = () => !!$("sheetHost").innerHTML;
+
+/* ---------- Classic ---------- */
+const classic = { streak: 0, current: null, rounds: 0, queue: [], served: new Set(), lastWin: false, revealed: false };
+const cR = makeRater($("classicRater"), "classic", () => {
+  const b = $("lock"); b.disabled = cR.guess === null || !cR.picked.size;
+  b.textContent = cR.guess === null ? "Slide to a color" : !cR.picked.size ? "Pick at least one tag" : "Lock it in";
+});
+function classicPick(){
+  if (classic.rounds % 2 === 1) return newRemix();
+  if (!classic.queue.length) { let pool = BUILTIN.filter(t => !classic.served.has(t.id)); if (!pool.length) { classic.served.clear(); pool = BUILTIN; } classic.queue = shuffle(pool); }
+  return classic.queue.shift();
+}
+function classicNext(){
+  const t = classicPick(); classic.current = t; classic.served.add(t.id); classic.revealed = false;
+  $("phone").innerHTML = phoneHTML(t); cR.reset(); watchThread(t.id); A.roundStart = Date.now();
+}
+function classicReveal(){
+  const t = classic.current; classic.revealed = true; classic.rounds++; cR.lock();
+  const real = posOf(t.score), diff = real - cR.guess, off = Math.abs(diff);
+  const right = TAGS.filter(x => cR.picked.has(x) && t.tags.includes(x)), wrong = TAGS.filter(x => cR.picked.has(x) && !t.tags.includes(x)), missed = t.tags.filter(x => !cR.picked.has(x));
+  const close = off <= TOL, win = close && right.length > 0, prev = classic.streak; classic.lastWin = win;
+  if (win) { classic.streak++; setBest("classic", classic.streak); }
+  paintTop(win); cR.markZone(real, "Real");
+  track(d => { d.modes.classic.rounds++; if (win) d.modes.classic.wins++; d.modes.classic.best = Math.max(d.modes.classic.best, classic.streak); },
+    { m: "c", id: t.id, g: Math.round(cR.guess), r: Math.round(real), ok: win, tags: [...cR.picked], right: right.length, ms: Date.now() - A.roundStart, streak: classic.streak });
+  const head = off <= 6 ? "Right on the color" : close ? "Close enough" : diff > 0 ? "More toxic than you thought" : "Less toxic than you thought";
+  const status = win ? `<div class="status win">${flames(classic.streak)} Streak ${classic.streak}${classic.streak === bestOf("classic") && classic.streak > 1 ? " · new best" : ""}</div>`
+    : `<div class="status lose">Streak over at ${prev}. ${!close && !right.length ? "Your color was too far off, and no tags matched." : !close ? "Your color was too far from the real one." : "Your color was close, but none of your tags matched."}</div>`;
+  const notes = [
+    ...right.map(tag => `<div class="tagnote right"><div class="t">${esc(tag)}<span>Correct</span></div><p>${esc(tag)} means ${esc(TAG[tag].def)}. You spotted it.</p></div>`),
+    ...wrong.map(tag => `<div class="tagnote wrong"><div class="t">${esc(tag)}<span>Why not</span></div><p>${esc(whyNot(tag, t))}</p></div>`),
+    ...missed.map(tag => `<div class="tagnote missed"><div class="t">${esc(tag)}<span>You missed</span></div><p>${esc(tag)} means ${esc(TAG[tag].def)}.</p></div>`)].join("");
+  openSheet(`<div class="result"><div class="badge" style="background:${colorAt(real)}">${zoneName(real)}</div><div><h2 id="resTitle">${head}</h2><p>You picked ${zoneName(cR.guess)} · Real: ${zoneName(real)}</p></div></div>
+    <div class="compare"><div class="bar" style="background:${GRADIENT}"><div class="dot" style="left:${cR.guess}%"></div><div class="dot real" style="left:${real}%"></div></div><div class="key"><span>You</span><span class="r">Real</span></div></div>
+    ${status}<p class="why">${esc(t.why)}</p>
+    <div class="section"><span class="label">Your tags</span><div class="breakdown">${notes}</div></div>
+    <div class="section"><span class="label">Sources</span>${sourceLinks(t, wrong)}</div>
+    ${feedbackHTML(t.id, true)}
+    <div class="section"><div class="row"><span class="label">Comments</span><span class="hint threadCount"></span></div><div id="sheetComments"></div></div>
+    <button class="btn next ${win ? "fire" : ""}" id="next">${win ? "Next text 🔥" : "Start a new streak"}</button>`);
+  wireFeedback($("sheetHost"), t.id, "classic");
+  mountComments($("sheetComments"), t.id);
+  $("next").focus({ preventScroll: true });
+  $("next").onclick = () => { classicAdvance(); window.scrollTo({ top: 0, behavior: "smooth" }); };
+}
+function classicAdvance(){ if (!classic.lastWin) { classic.streak = 0; paintTop(); } closeSheet(); classicNext(); }
+$("lock").onclick = () => { if (!classic.revealed && cR.guess !== null && cR.picked.size) classicReveal(); };
+
+/* ---------- Which Is Worse (higher or lower) ---------- */
+const hl = { a: null, b: null, streak: 0, done: false, win: false };
+function hlPartner(a){
+  for (let i = 0; i < 120; i++) { const c = randomScored(); if (c.id !== a.id && Math.abs(c.score - a.score) >= 2 && Math.max(c.score, a.score) >= 5) return c; }
+  return BUILTIN.find(t => Math.abs(t.score - a.score) >= 2 && Math.max(t.score, a.score) >= 5) || BUILTIN[0];
+}
+function hlDraw(){
+  hl.done = false;
+  $("hlA").innerHTML = phoneHTML(hl.a, { compact: true }); $("hlB").innerHTML = phoneHTML(hl.b, { compact: true });
+  $("hlBadgeA").innerHTML = ""; $("hlBadgeB").innerHTML = ""; $("hlResult").innerHTML = "";
+  ["hlColA", "hlColB"].forEach(id => $(id).classList.remove("won", "lost"));
+  $("hlPickA").hidden = false; $("hlPickB").hidden = false;
+}
+function hlNew(){ hl.a = randomScored(); hl.b = hlPartner(hl.a); hlDraw(); }
+function hlChoose(side){
+  if (hl.done) return; hl.done = true;
+  const worse = hl.a.score > hl.b.score ? "A" : "B", win = side === worse; hl.win = win;
+  if (win) { hl.streak++; setBest("hl", hl.streak); }
+  paintTop(win);
+  const badge = t => `<span class="minibadge" style="background:${colorAt(posOf(t.score))}">${zoneName(posOf(t.score))}</span>`;
+  $("hlBadgeA").innerHTML = badge(hl.a); $("hlBadgeB").innerHTML = badge(hl.b);
+  $("hlCol" + worse).classList.add("won"); $("hlCol" + (worse === "A" ? "B" : "A")).classList.add("lost");
+  $("hlPickA").hidden = true; $("hlPickB").hidden = true;
+  const W = worse === "A" ? hl.a : hl.b, L = worse === "A" ? hl.b : hl.a;
+  $("hlResult").innerHTML = `<div class="resultpanel">
+    <div class="status ${win ? "win" : "lose"}">${win ? `${flames(hl.streak)} Streak ${hl.streak}` : `Streak over at ${hl.streak}`}</div>
+    <h2>${worse} was worse: ${esc(W.name)} (${zoneName(posOf(W.score))})</h2>
+    <p>${esc(W.why)}</p>
+    <p class="muted"><b style="color:var(--fg)">${esc(L.name)} (${zoneName(posOf(L.score))}):</b> ${esc(L.why)}</p>
+    ${feedbackHTML(hl.a.id + "|" + hl.b.id, true)}
+    <button type="button" class="btn ${win ? "fire" : ""}" id="hlNext">${win ? "Next matchup 🔥" : "Start a new streak"}</button></div>`;
+  wireFeedback($("hlResult"), hl.a.id + "|" + hl.b.id, "hl");
+  track(d => { d.modes.hl.rounds++; if (win) d.modes.hl.wins++; d.modes.hl.best = Math.max(d.modes.hl.best, hl.streak); },
+    { m: "h", id: hl.a.id + "|" + hl.b.id, pick: side, ok: win, streak: hl.streak });
+  $("hlNext").onclick = () => {
+    if (!hl.win) { hl.streak = 0; paintTop(); hlNew(); }
+    else { hl.a = hl.b; hl.b = hlPartner(hl.a); hlDraw(); }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  $("hlResult").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+$("hlPickA").onclick = () => hlChoose("A");
+$("hlPickB").onclick = () => hlChoose("B");
+
+/* ---------- Red or Green Blitz ---------- */
+const blitz = { timer: null, left: 60, score: 0, total: 0, current: null, misses: [], running: false };
+function blitzCandidate(){ for (let i = 0; i < 60; i++) { const t = randomScored(); if ((t.score <= 3 || t.score >= 6) && (!blitz.current || t.id !== blitz.current.id)) return t; } return BUILTIN[1]; }
+function blitzReset(){ $("blitzStart").hidden = false; $("blitzRun").hidden = true; $("blitzEnd").hidden = true; }
+function blitzShow(){ blitz.current = blitzCandidate(); $("blitzPhone").innerHTML = phoneHTML(blitz.current, { compact: true }); }
+function blitzStart(){
+  Object.assign(blitz, { left: 60, score: 0, total: 0, misses: [], running: true });
+  $("blitzStart").hidden = true; $("blitzEnd").hidden = true; $("blitzRun").hidden = false;
+  $("blitzScore").textContent = 0; blitzShow(); blitzTick();
+  clearInterval(blitz.timer); const t0 = Date.now(); let penalty = 0;
+  blitz.penalize = s => { penalty += s; };
+  blitz.timer = setInterval(() => { blitz.left = Math.max(0, 60 - (Date.now() - t0) / 1000 - penalty); blitzTick(); if (blitz.left <= 0) blitzStop(true); }, 200);
+}
+function blitzTick(){ $("blitzTime").textContent = Math.ceil(blitz.left); $("blitzBar").style.width = (blitz.left / 60 * 100) + "%"; }
+function blitzAnswer(red){
+  if (!blitz.running) return;
+  const t = blitz.current, ok = (t.score >= 6) === red; blitz.total++;
+  if (ok) blitz.score++; else { blitz.misses.push({ t, red }); blitz.penalize(3); }
+  track(d => { d.modes.blitz.answers++; if (ok) d.modes.blitz.correct++; }, ok ? null : { m: "b", id: t.id, red, ok: false });
+  $("blitzScore").textContent = blitz.score;
+  const p = $("blitzPhone"); p.classList.remove("flash-ok", "flash-bad"); void p.offsetWidth; p.classList.add(ok ? "flash-ok" : "flash-bad");
+  blitzShow();
+}
+function blitzStop(finished){
+  if (!blitz.running) return;
+  clearInterval(blitz.timer); blitz.running = false;
+  if (!finished) { blitzReset(); return; }
+  const newBest = blitz.score > bestOf("blitz"); setBest("blitz", blitz.score); paintTop();
+  track(d => { d.modes.blitz.runs++; d.modes.blitz.best = Math.max(d.modes.blitz.best, blitz.score); }, { m: "B", score: blitz.score, total: blitz.total });
+  $("blitzRun").hidden = true; const end = $("blitzEnd"); end.hidden = false;
+  end.innerHTML = `<div class="resultpanel">
+    <h2>${blitz.score} correct${newBest && blitz.score ? " · new best" : ""}</h2>
+    <p class="muted">${blitz.total} answered · ${blitz.total ? Math.round(blitz.score / blitz.total * 100) : 0}% accuracy · best ${bestOf("blitz")}</p>
+    ${blitz.misses.length ? `<span class="label">What you missed</span><div class="misses">${blitz.misses.slice(0, 8).map(m => `<div class="miss"><b>${esc(m.t.name)}: "${esc(lastThem(m.t))}"</b>You said ${m.red ? "red" : "green"}. It's ${m.t.score >= 6 ? "a red flag" : "a green flag"}. ${esc(m.t.why)}</div>`).join("")}</div>` : `<p>No misses. Clean run.</p>`}
+    <button type="button" class="btn" id="blitzAgain">Play again</button></div>`;
+  $("blitzAgain").onclick = blitzStart;
+}
+$("blitzGo").onclick = blitzStart;
+$("blitzRed").onclick = () => blitzAnswer(true);
+$("blitzGreen").onclick = () => blitzAnswer(false);
+
+
+/* ---------- server connection ---------- */
+const API = (typeof window.RFM_API === "string" && /^(https:\/\/|http:\/\/localhost)/.test(window.RFM_API) ? window.RFM_API : "").replace(/\/+$/, "");
+let online = false, capsSettled = false, adminKey = load("rfm-admin") || "", myName = null;
+function rid(n){ const a = new Uint8Array(n); crypto.getRandomValues(a); return [...a].map(b => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join(""); }
+function ident(){
+  let pid = load("rfm-pid"), sec = load("rfm-secret");
+  if (!/^[a-z0-9]{16,40}$/.test(pid || "") || !/^[a-z0-9]{24,64}$/.test(sec || "")) { pid = rid(20); sec = rid(32); store("rfm-pid", pid); store("rfm-secret", sec); }
+  return { pid, sec };
+}
+const ME = ident(), myId = ME.pid;
+async function api(path, { method = "GET", body, admin } = {}){
+  if (!API) throw { code: "offline" };
+  const headers = { "X-Player": ME.pid, "X-Secret": ME.sec };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (admin && adminKey) headers["Authorization"] = "Bearer " + adminKey;
+  let res;
+  try { res = await fetch(API + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined }); }
+  catch (e) { throw { code: "network" }; }
+  let data = null; try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw { code: (data && data.error) || "http_" + res.status, status: res.status, message: data && data.message };
+  return data;
+}
+const errMsg = (e, fallback) => e && e.code === "rate_limited" ? "You're going fast. Wait a minute and try again." : e && e.code === "network" ? "Can't reach the server. Check your connection." : (e && e.message) || fallback;
+const labelOf = t => t ? `${t.name}${t.player ? " (player text)" : t.remix ? " (remix)" : ""}: "${lastThem(t).slice(0, 80)}"` : "";
+const labelKey = key => key.split("|").map(id => labelOf(scen(id)) || id).join("  vs  ");
+const offlineMsg = () => API ? "Can't reach the game's server right now. Try again in a bit." : "Comments, votes and history turn on once the game's server is connected.";
+
+/* ---------- Crowd Verdict ---------- */
+const crowd = { current: null, votes: +load("rfm-votes") || 0, voted: new Set(), seen: new Set() };
+const crR = makeRater($("crowdRater"), "crowd", () => {
+  const b = $("crowdVote"); b.disabled = crR.guess === null || !crR.picked.size;
+  b.textContent = crR.guess === null ? "Slide to a color" : !crR.picked.size ? "Pick at least one tag" : "Cast my vote";
+});
+function crowdPick(){
+  const unvoted = t => !crowd.voted.has(t.id) && !crowd.seen.has(t.id);
+  const player = [...subs.values()].filter(t => t.status === "approved" && unvoted(t)).sort((a, b) => b.at - a.at);
+  if (player.length && Math.random() < 0.6) return player[0];
+  for (let i = 0; i < 30; i++) { const t = Math.random() < 0.5 ? rand(BUILTIN) : newRemix(); if (unvoted(t)) return t; }
+  return newRemix();
+}
+function showCrowdText(t){
+  crowd.current = t; crowd.seen.add(t.id);
+  const who = t.by === myId ? "you" : (t.byName || "a player");
+  $("crowdPhone").innerHTML = phoneHTML(t) + (t.player ? `<p class="hint" style="margin:8px 4px 0">Added by ${esc(who)} · ${ago(t.at)}${canRemove(t) ? ` · <button type="button" class="linkbtn" id="removeSub">Remove</button>` : ""}</p>` : "");
+  if ($("removeSub")) $("removeSub").onclick = () => removeSub(t);
+  crR.reset(); watchThread(t.id);
+}
+function crowdNext(){ showCrowdText(crowdPick()); }
+const canRemove = t => t.player && online && (t.by === myId || !!adminKey);
+async function removeSub(t, after){
+  try { await api("/api/submissions/" + encodeURIComponent(t.id), { method: "DELETE", admin: true }); subs.delete(t.id); toast("Removed."); (after || crowdNext)(); pollMe(true); }
+  catch (e) { toast(errMsg(e, "Couldn't remove it. Try again.")); }
+}
+async function crowdAggregate(id){ if (!online) return null; return api("/api/crowd?text=" + encodeURIComponent(id)); }
+function crowdHTML(agg, mine){
+  if (!agg) return `<p class="empty">${esc(offlineMsg())}</p>`;
+  if (!agg.n) return `<p class="empty">No votes yet. Be the first.</p>`;
+  const maxH = Math.max(...agg.hist, 1);
+  return `<div class="result"><div class="badge" style="background:${colorAt(agg.avg)}">${zoneName(agg.avg)}</div><div><h2>The crowd says ${zoneName(agg.avg)}</h2><p>${agg.n} vote${agg.n === 1 ? "" : "s"}${mine ? ` · You said ${zoneName(mine.p)}` : ""}</p></div></div>
+    <div class="compare"><div class="bar" style="background:${GRADIENT}">${mine ? `<div class="dot" style="left:${mine.p}%"></div>` : ""}<div class="dot real" style="left:${agg.avg}%"></div></div><div class="key">${mine ? "<span>You</span>" : ""}<span class="r">Crowd average</span></div></div>
+    <div class="section"><span class="label">How people voted</span><div class="hist">${agg.hist.map((h, i) => `<div><i style="height:${Math.round(h / maxH * 70) + 4}px;background:${colorAt(i * 20 + 10)}" title="${h} votes"></i><span>${ZONES[i]}<br>${h}</span></div>`).join("")}</div></div>
+    <div class="section"><span class="label">Most picked tags</span><div class="tagbars">${agg.top.length ? agg.top.map(([tag, c]) => `<div class="tagbar${mine && mine.tags.includes(tag) ? " yours" : ""}"><span>${esc(tag)}</span><div class="bar"><i style="width:${Math.round(c / agg.n * 100)}%"></i></div><span class="pct">${Math.round(c / agg.n * 100)}%</span></div>`).join("") : `<p class="hint">No tags yet.</p>`}</div>${mine ? `<span class="hint">Blue bars are tags you picked.</span>` : ""}</div>`;
+}
+async function crowdVote(){
+  const t = crowd.current; if (!t || crR.guess === null || !crR.picked.size) return;
+  const btn = $("crowdVote"); btn.disabled = true; btn.textContent = "Counting…";
+  const mineV = { p: crR.guess, tags: [...crR.picked] };
+  crR.lock();
+  let agg = null, err = null;
+  if (online) {
+    try { agg = await api("/api/votes", { method: "PUT", body: { textId: t.id, p: mineV.p, tags: mineV.tags, label: labelOf(t) } }); }
+    catch (e) { err = e; try { agg = await crowdAggregate(t.id); } catch (x) {} }
+  } else err = { code: "offline" };
+  if (!err) { crowd.voted.add(t.id); crowd.votes++; store("rfm-votes", String(crowd.votes)); paintTop(true); pollMe(true); }
+  if (agg && agg.n) crR.markZone(agg.avg, "Crowd");
+  openSheet(`<span id="resTitle" hidden>Crowd verdict</span>${crowdHTML(agg, mineV)}
+    ${err ? `<p class="hint">Your vote wasn't saved. ${esc(err.code === "offline" ? offlineMsg() : errMsg(err, "Try again."))}</p>` : ""}
+    <div class="section"><span class="label">Read more about these tags</span>${sourceLinks({ tags: agg && agg.top ? agg.top.map(x => x[0]).slice(0, 3) : mineV.tags })}</div>
+    ${feedbackHTML(t.id, false)}
+    <div class="section"><div class="row"><span class="label">Comments</span><span class="hint threadCount"></span></div><div id="sheetComments"></div></div>
+    <button class="btn next" id="next">Next text</button>`);
+  wireFeedback($("sheetHost"), t.id, "crowd");
+  if (!err) track(d => d.modes.crowd.votes++, { m: "v", id: t.id, g: Math.round(mineV.p), tags: mineV.tags, crowd: agg && agg.n ? Math.round(agg.avg) : null });
+  mountComments($("sheetComments"), t.id);
+  $("next").onclick = () => { closeSheet(); crowdNext(); window.scrollTo({ top: 0, behavior: "smooth" }); };
+}
+$("crowdVote").onclick = crowdVote;
+
+/* ---------- Add a text ---------- */
+const SAMPLE_THREAD = `~Yesterday 9:14 PM
+> can we talk about the party?
+< there's nothing to talk about
+!Read 9:20 PM
+~Today 8:02 AM
+> ok so you're just going to ignore me?
+!Read 8:03 AM`;
+$("openSubmit").onclick = () => {
+  const box = $("crowdSubmit"); if (!box.hidden) { box.hidden = true; return; }
+  box.hidden = false;
+  if (!online) { box.innerHTML = `<h2>Add a text</h2><p class="muted">${esc(offlineMsg())}</p>`; return; }
+  box.innerHTML = `<h2>Add a text</h2>
+    <p class="muted">Change every name and remove anything that could identify someone. Only post messages you have the right to share.</p>
+    <div class="form">
+      <label for="subName">Their name (make one up)<input type="text" id="subName" maxlength="18" placeholder="Jordan"></label>
+      <label for="subThread">The thread<textarea id="subThread" spellcheck="false" placeholder="${esc(SAMPLE_THREAD)}"></textarea></label>
+      <p class="hint" style="margin:0">One line each. <code>&gt;</code> for your messages, <code>&lt;</code> for theirs, <code>~Today 9:41 PM</code> for a timestamp, <code>!Read 9:43 PM</code> or <code>!Delivered</code> for a receipt. Slurs are replaced with <code>****</code> automatically.</p>
+      <span class="label">Preview</span><div id="subPreview"><p class="empty">Start typing to see it as a chat.</p></div>
+      <div class="row" style="align-items:center"><span class="hint" id="subMsg"></span><button type="button" class="small-btn" id="subSend" disabled>Add to Crowd Verdict</button></div>
+    </div>`;
+  const nameI = $("subName"), threadI = $("subThread"), send = $("subSend"), msg = $("subMsg");
+  const parse = () => ({ name: censor(cleanName(nameI.value)) || "Them", msgs: cleanMsgs(threadI.value.split("\n")).map(censor) });
+  const update = () => {
+    const d = parse(), ok = d.msgs.filter(m => m.startsWith("< ")).length >= 1 && d.msgs.filter(m => /^(> |< )/.test(m)).length >= 2;
+    $("subPreview").innerHTML = d.msgs.length ? phoneHTML({ name: d.name, msgs: d.msgs, player: true }, { compact: true }) : `<p class="empty">Start typing to see it as a chat.</p>`;
+    send.disabled = !ok; msg.textContent = ok ? "" : "Needs at least 2 messages, one from them.";
+  };
+  nameI.oninput = update; threadI.oninput = update;
+  send.onclick = async () => {
+    const d = parse(); send.disabled = true; send.textContent = "Adding…";
+    try {
+      const r = await api("/api/submissions", { method: "POST", body: { name: d.name, msgs: d.msgs } });
+      const t = normalizeSub(r.id, r.item);
+      track(dd => dd.modes.crowd.added++, { m: "s", id: t.id, lines: t.msgs.length });
+      rememberStatus(t.id, t.status);
+      if (t.status === "approved") { subs.set(t.id, t); box.hidden = true; toast("Added. It's live in Crowd Verdict."); SFX.play("approve"); showCrowdText(t); }
+      else {
+        SFX.play("send");
+        box.innerHTML = `<div class="review-card"><div class="review-icon" aria-hidden="true">⏳</div><h2>Under review</h2>
+          <p class="muted">Thanks! Your text was sent to the game's owner. You'll get a notification here when it's accepted or declined.</p>
+          ${phoneHTML(t, { compact: true })}
+          <div class="row" style="align-items:center"><button type="button" class="small-btn ghost" id="seeMyTexts">See my texts</button><button type="button" class="small-btn" id="addAnother">Add another</button></div></div>`;
+        $("seeMyTexts").onclick = () => { box.hidden = true; showView("comments"); document.querySelector("#sub-texts").click(); };
+        $("addAnother").onclick = () => { box.hidden = true; $("openSubmit").click(); };
+      }
+      renderStats(); pollMe(true);
+    } catch (e) { send.disabled = false; send.textContent = "Add to Crowd Verdict"; msg.textContent = errMsg(e, "Couldn't add it. Try again."); }
+  };
+};
+function normalizeSub(id, d){
+  if (!d) return null; const msgs = cleanMsgs(d.msgs).map(censor);
+  if (msgs.filter(m => m.startsWith("< ")).length < 1) return null;
+  return { id, name: censor(cleanName(d.name)) || "Them", msgs, by: typeof d.author === "string" ? d.author : null, byName: d.authorName || null, at: +d.at || 0, player: true, tags: [], score: null, votes: +d.votes || 0, comments: +d.comments || 0, status: d.status || "approved", decided: +d.decided || 0, reason: d.reason || "" };
+}
+
+/* ---------- comments ---------- */
+let mine = [], repliesToMe = [], textComments = [], myVotes = [], myTextsList = [];
+let thread = { id: null, list: [], ready: false, timer: null, failed: false, sig: "" };
+let lastSeen = +load("rfm-seen") || 0, mePrimed = false, meSig = "";
+const valid = c => c && typeof c.body === "string" && typeof c.textId === "string" && typeof c.at === "number";
+const names = {};
+const rememberNames = list => list.forEach(c => { if (c.authorName) names[c.author] = c.authorName; if (c.parentAuthor && c.parentName) names[c.parentAuthor] = c.parentName; });
+const nameOf = id => (id && id === myId) ? "You" : (names[id] || (id ? "Player " + id.slice(0, 4).toUpperCase() : "Someone"));
+const myTexts = () => myTextsList;
+let knownStatus = {}; try { knownStatus = JSON.parse(load("rfm-status") || "{}") || {}; } catch (e) {}
+function rememberStatus(id, st){ knownStatus[id] = st; store("rfm-status", JSON.stringify(knownStatus)); }
+const STATUS_TEXT = { pending: "⏳ Under review", approved: "✅ Accepted", declined: "❌ Declined" };
+function statusItems(){
+  return myTextsList.filter(t => t.status !== "pending" && t.decided).map(t => ({
+    id: "st-" + t.id, kind: "status", textId: t.id, at: t.decided, author: "system", status: t.status,
+    body: t.status === "approved" ? "Your text is live in Crowd Verdict." : "Your text wasn't accepted." + (t.reason ? " Reason: " + t.reason : "")
+  }));
+}
+function activityList(){
+  const m = new Map();
+  repliesToMe.forEach(r => m.set(r.id, { ...r, kind: "reply" }));
+  textComments.forEach(c => { if (!m.has(c.id)) m.set(c.id, { ...c, kind: "ontext" }); });
+  statusItems().forEach(s => m.set(s.id, s));
+  return [...m.values()].filter(r => r.author !== myId).sort((a, b) => b.at - a.at);
+}
+function watchThread(id){
+  if (!online || !id) { paintThreadCount(); return; }
+  if (thread.id === id) { paintThreadCount(); return; }
+  clearInterval(thread.timer);
+  thread = { id, list: [], ready: false, timer: null, failed: false, sig: "" };
+  fetchThread(id);
+  thread.timer = setInterval(() => { if (document.visibilityState === "visible") fetchThread(id); }, 15000);
+}
+async function fetchThread(id){
+  try {
+    const r = await api("/api/thread?text=" + encodeURIComponent(id));
+    if (thread.id !== id) return;
+    const list = (r.comments || []).filter(valid); rememberNames(list);
+    const sig = list.map(c => c.id).join(","), changed = sig !== thread.sig || !thread.ready;
+    thread.sig = sig; thread.list = list; thread.ready = true; thread.failed = false;
+    paintThreadCount(); if (changed && mounted && mounted.id === id) drawComments();
+  } catch (e) { if (thread.id === id) { thread.ready = true; thread.failed = true; if (mounted) drawComments(); } }
+}
+function paintThreadCount(){
+  const n = thread.ready ? thread.list.length : 0;
+  document.querySelectorAll(".ccount").forEach(el => el.textContent = n ? String(n) : "");
+  document.querySelectorAll(".threadCount").forEach(el => el.textContent = thread.ready ? (n === 1 ? "1 comment" : `${n} comments`) : "");
+}
+let mounted = null, replyTarget = null, posting = false;
+function mountComments(host, id){
+  mounted = { host, id }; replyTarget = null;
+  host.innerHTML = `<div class="clist"></div><div class="composerHost"></div>`;
+  watchThread(id); paintThreadCount(); drawComments(); drawComposer();
+}
+function drawComments(){
+  if (!mounted) return;
+  const box = mounted.host.querySelector(".clist"); if (!box) return;
+  if (!online) { box.innerHTML = capsSettled ? `<p class="empty">${esc(offlineMsg())}</p>` : `<p class="empty">Loading comments…</p>`; return; }
+  if (!thread.ready || thread.id !== mounted.id) { box.innerHTML = `<p class="empty">Loading comments…</p>`; return; }
+  if (thread.failed && !thread.list.length) { box.innerHTML = `<p class="empty">Couldn't load comments. Check your connection.</p>`; return; }
+  const list = thread.list;
+  if (!list.length) { box.innerHTML = `<p class="empty">No comments on this text yet. Say what you think it is.</p>`; return; }
+  const tops = list.filter(c => !c.root || !list.some(x => x.id === c.root));
+  const frag = document.createDocumentFragment();
+  tops.forEach(c => { frag.append(cmtEl(c, false)); list.filter(r => r.root === c.id).forEach(r => frag.append(cmtEl(r, true))); });
+  box.replaceChildren(frag);
+}
+function cmtEl(c, isReply){
+  const row = document.createElement("div"); row.className = "cmt" + (isReply ? " reply" : ""); row.id = "c-" + c.id;
+  const nm = nameOf(c.author);
+  const av = document.createElement("div"); av.className = "cav"; av.textContent = (nm[0] || "?").toUpperCase();
+  const body = document.createElement("div"); body.className = "cmt-body";
+  const bub = document.createElement("div"); bub.className = "cmt-bubble" + (c.author === myId ? " mine" : "");
+  const meta = document.createElement("div"); meta.className = "cmt-meta";
+  const b = document.createElement("b"); b.textContent = nm;
+  const when = document.createElement("span"); when.textContent = ago(c.at);
+  meta.append(b, when);
+  if (isReply && c.parentAuthor) { const to = document.createElement("span"); to.textContent = "→ " + nameOf(c.parentAuthor); meta.append(to); }
+  const p = document.createElement("p"); p.textContent = c.body;
+  bub.append(meta, p);
+  const acts = document.createElement("div"); acts.className = "cmt-acts";
+  if (online) {
+    const rb = document.createElement("button"); rb.type = "button"; rb.className = "linkbtn"; rb.textContent = "Reply";
+    rb.onclick = () => { replyTarget = { id: c.id, author: c.author }; drawComposer(); const ta = mounted && mounted.host.querySelector("textarea"); if (ta) ta.focus(); };
+    acts.append(rb);
+  }
+  if (online && (c.author === myId || adminKey)) {
+    const del = document.createElement("button"); del.type = "button"; del.className = "linkbtn"; del.textContent = "Delete";
+    del.onclick = async () => { del.disabled = true; try { await api("/api/comments/" + c.id, { method: "DELETE", admin: true }); fetchThread(c.textId); pollMe(true); } catch (e) { del.disabled = false; del.textContent = "Couldn't delete"; } };
+    acts.append(del);
+  }
+  body.append(bub, acts); row.append(av, body);
+  return row;
+}
+function drawComposer(){
+  if (!mounted) return;
+  const host = mounted.host.querySelector(".composerHost"); if (!host) return;
+  if (!online) { host.innerHTML = ""; return; }
+  const old = host.querySelector("textarea"), draft = old ? old.value : "";
+  host.innerHTML = `<div class="composer">
+    ${replyTarget ? `<div class="replying"><span>Replying to ${esc(nameOf(replyTarget.author))}</span><button type="button" class="linkbtn cancelReply">Cancel</button></div>` : ""}
+    <textarea id="cmtInput-${esc(mounted.id)}" maxlength="280" aria-label="Comment" placeholder="${replyTarget ? "Write a reply…" : "Is it really that bad? Add your take…"}"></textarea>
+    <div class="row"><span class="hint cmtMsg">Posting as ${esc(myName || nameOf("") )}</span><button class="small-btn cmtPost" type="button" disabled>${replyTarget ? "Reply" : "Post"}</button></div></div>`;
+  const ta = host.querySelector("textarea"), btn = host.querySelector(".cmtPost"), msg = host.querySelector(".cmtMsg");
+  if (!myName) msg.textContent = `Posting as ${"Player " + myId.slice(0, 4).toUpperCase()} · set a name in History`;
+  ta.value = draft; btn.disabled = !draft.trim();
+  const cancel = host.querySelector(".cancelReply"); if (cancel) cancel.onclick = () => { replyTarget = null; drawComposer(); };
+  ta.oninput = () => { btn.disabled = posting || !ta.value.trim(); msg.textContent = `${280 - ta.value.length} left`; };
+  btn.onclick = async () => {
+    const text = ta.value.trim(); if (!text || posting) return;
+    posting = true; btn.disabled = true; btn.textContent = "Posting…";
+    const id = mounted.id;
+    try {
+      await api("/api/comments", { method: "POST", body: { textId: id, body: text.slice(0, 280), replyTo: replyTarget ? replyTarget.id : null, label: labelOf(scen(id)) } });
+      SFX.play("post");
+      ta.value = ""; replyTarget = null; posting = false; drawComposer(); fetchThread(id); pollMe(true);
+      const m = host.querySelector(".cmtMsg"); if (m) m.textContent = "Posted";
+    } catch (e) { posting = false; msg.textContent = errMsg(e, "Couldn't post. Try again."); btn.textContent = replyTarget ? "Reply" : "Post"; btn.disabled = false; }
+  };
+}
+
+/* ---------- me: polled for History + notifications ---------- */
+async function pollMe(force){
+  if (!online) return;
+  try {
+    const r = await api("/api/me");
+    const sig = JSON.stringify(r); if (!force && sig === meSig) return; meSig = sig;
+    const before = new Set(activityList().map(x => x.id));
+    rememberNames([...(r.comments || []), ...(r.replies || []), ...(r.onMyTexts || [])]);
+    mine = (r.comments || []).filter(valid); repliesToMe = (r.replies || []).filter(valid); textComments = (r.onMyTexts || []).filter(valid);
+    myVotes = (r.votes || []).filter(v => typeof v.textId === "string" && typeof v.p === "number");
+    myVotes.forEach(v => crowd.voted.add(v.textId)); crowd.votes = myVotes.length; store("rfm-votes", String(crowd.votes));
+    myTextsList = (r.texts || []).map(x => normalizeSub(x.id, x)).filter(Boolean); myTextsList.forEach(t => subs.set(t.id, t));
+    if (r.name) { myName = r.name; const ni = $("nick"); if (ni && document.activeElement !== ni) ni.value = r.name; }
+    paintTop(); paintBadge();
+    // decisions on my texts (also catches ones made while I was away)
+    const decided = myTextsList.filter(t => t.status !== "pending" && knownStatus[t.id] && knownStatus[t.id] !== t.status);
+    myTextsList.forEach(t => { if (knownStatus[t.id] !== t.status) rememberStatus(t.id, t.status); });
+    if (decided.length) {
+      const t = decided[0], ok = t.status === "approved";
+      SFX.play(ok ? "approve" : "decline"); if (ok) burst(50);
+      toast(ok ? `✅ Your text with ${t.name} was accepted. It's live!` : `❌ Your text with ${t.name} was declined.${t.reason ? " " + t.reason : ""}`, () => openDetail(t.id));
+    } else if (mePrimed) {
+      const nw = activityList().filter(x => !before.has(x.id) && x.kind !== "status");
+      if (nw.length) {
+        const x = nw[0], t = scen(x.textId);
+        const what = x.kind === "reply" ? "replied" : `commented on your text${t ? " with " + t.name : ""}`;
+        SFX.play("ding");
+        toast(`💬 ${nameOf(x.author)} ${what}: "${x.body.slice(0, 60)}${x.body.length > 60 ? "…" : ""}"`, () => openDetail(x.textId, x.id));
+      }
+    }
+    mePrimed = true;
+    if (view === "comments" && !detailId) renderFeed();
+  } catch (e) {}
+}
+setInterval(() => { if (document.visibilityState === "visible") pollMe(); }, 30000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") pollMe(); });
+
+/* ---------- History view ---------- */
+let sub = "activity", detailId = null;
+document.querySelectorAll(".subtabs button").forEach(b => b.onclick = () => { sub = b.dataset.sub; document.querySelectorAll(".subtabs button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); renderFeed(); });
+const unread = () => activityList().filter(r => r.at > lastSeen);
+function paintBadge(){ const n = unread().length, b = $("notifBadge"); b.hidden = !n; b.textContent = n > 99 ? "99+" : n; }
+async function ensureScen(id){
+  if (scen(id) || !online || !/^s[a-z0-9]{4,40}$/.test(id)) return scen(id);
+  try { const r = await api("/api/submissions/" + id); const t = normalizeSub(r.item.id, r.item); if (t) subs.set(t.id, t); } catch (e) {}
+  return scen(id);
+}
+function itemBtn(t, title, line, side, isUnread, onClick, swatch){
+  const b = document.createElement("button"); b.type = "button"; b.className = "item" + (isUnread ? " unread" : "");
+  b.innerHTML = `<div class="im-av">${esc((t ? t.name : "?")[0].toUpperCase())}</div><div class="item-main"><b></b><span></span></div><div class="item-side"></div>`;
+  b.querySelector("b").textContent = title; if (isUnread) b.querySelector("b").insertAdjacentHTML("beforeend", `<span class="unreaddot" aria-label="unread"></span>`);
+  b.querySelector(".item-main span").textContent = line;
+  const sd = b.querySelector(".item-side"); sd.textContent = side;
+  if (swatch != null) sd.insertAdjacentHTML("afterbegin", `<i class="swatch" style="background:${colorAt(swatch)}"></i>`);
+  b.onclick = onClick; return b;
+}
+async function renderFeed(){
+  if (view !== "comments" || detailId) return;
+  const feed = $("feed");
+  if (!online) { feed.innerHTML = `<p class="empty">${capsSettled ? esc(offlineMsg()) : "Loading…"}</p>`; return; }
+  if (sub === "activity") {
+    const list = activityList();
+    await Promise.all([...new Set(list.map(r => r.textId))].map(ensureScen));
+    feed.innerHTML = "";
+    if (!list.length) feed.innerHTML = `<p class="empty">Replies to your comments and new comments on texts you added show up here, with a badge on the History tab.</p>`;
+    list.forEach(r => {
+      const t = scen(r.textId);
+      const title = r.kind === "status" ? `${r.status === "approved" ? "✅ Accepted" : "❌ Declined"}: your text with ${t ? t.name : "someone"}` : r.kind === "reply" ? `${nameOf(r.author)} replied on ${t ? t.name + "'s" : "a"} text` : `${nameOf(r.author)} commented on your text${t ? " · " + t.name : ""}`;
+      feed.append(itemBtn(t, title, r.body, ago(r.at), r.at > lastSeen, () => openDetail(r.textId, r.id)));
+    });
+    markSeen();
+  } else if (sub === "mine") {
+    const list = mine.slice().sort((a, b) => b.at - a.at);
+    await Promise.all([...new Set(list.map(c => c.textId))].map(ensureScen));
+    feed.innerHTML = "";
+    if (!list.length) feed.innerHTML = `<p class="empty">Your comments are saved here so you can come back to them. Post one after any round.</p>`;
+    list.forEach(c => {
+      const t = scen(c.textId), n = repliesToMe.filter(r => r.author !== myId && r.root === (c.root || c.id)).length;
+      feed.append(itemBtn(t, `${t ? t.name : "A text"}${c.root ? " · your reply" : ""}`, c.body, `${ago(c.at)}${n ? ` · ${n} repl${n === 1 ? "y" : "ies"}` : ""}`, false, () => openDetail(c.textId, c.id)));
+    });
+  } else if (sub === "votes") {
+    const list = myVotes.slice().sort((a, b) => b.at - a.at);
+    await Promise.all([...new Set(list.map(v => v.textId))].map(ensureScen));
+    feed.innerHTML = "";
+    if (!list.length) { feed.innerHTML = `<p class="empty">Every vote you cast in Crowd Verdict is saved here. Open one to see your vote next to the crowd's.</p>`; return; }
+    list.forEach(v => { const t = scen(v.textId); feed.append(itemBtn(t, t ? t.name + (t.player ? " · Player text" : "") : "A removed text", (v.tags || []).join(", ") || (t ? lastThem(t) : ""), `You: ${zoneName(v.p)} · ${ago(v.at)}`, false, () => openDetail(v.textId), v.p)); });
+  } else {
+    const list = myTexts();
+    feed.innerHTML = "";
+    if (!list.length) {
+      feed.innerHTML = `<p class="empty">Texts you add in Crowd Verdict show up here with everyone's votes and comments.</p>`;
+      const go = document.createElement("button"); go.type = "button"; go.className = "small-btn"; go.textContent = "Add a text"; go.style.justifySelf = "center";
+      go.onclick = () => { setMode("crowd"); if ($("crowdSubmit").hidden) $("openSubmit").click(); };
+      feed.append(go); return;
+    }
+    list.forEach(t => {
+      const b = itemBtn(t, t.name, lastThem(t), t.status === "approved" ? `🗳️ ${t.votes} · 💬 ${t.comments} · ${ago(t.at)}` : ago(t.at), false, () => openDetail(t.id));
+      b.querySelector(".item-main b").insertAdjacentHTML("beforeend", ` <span class="stchip st-${t.status}">${STATUS_TEXT[t.status] || ""}</span>`);
+      feed.append(b);
+    });
+  }
+}
+async function openDetail(id, focusId){
+  if (sheetOpen()) {
+    closeSheet();
+    if (mode === "classic" && classic.revealed) classicAdvance();
+    else if (mode === "crowd") crowdNext();
+  }
+  detailId = id; showView("comments");
+  $("commentsList").hidden = true; const d = $("commentsDetail"); d.hidden = false;
+  const t = await ensureScen(id);
+  if (!t) { d.innerHTML = `<button class="back" id="backBtn" type="button">‹ Back</button><p class="empty">This text isn't in the library anymore.</p>`; $("backBtn").onclick = closeDetail; return; }
+  const myVote = myVotes.find(v => v.textId === id), isMineText = t.player && t.by && t.by === myId;
+  if (t.player && t.status !== "approved") {
+    d.innerHTML = `<button class="back" id="backBtn" type="button">‹ Back</button>
+      <div class="review-card"><div class="review-icon${t.status === "pending" ? "" : " still"}" aria-hidden="true">${t.status === "pending" ? "⏳" : "❌"}</div>
+      <h2>${t.status === "pending" ? "Under review" : "Declined"}</h2>
+      <p class="muted">${t.status === "pending" ? "The game's owner hasn't reviewed this yet. You'll get a notification when they do." : "This text wasn't accepted, so it isn't shown to other players." + (t.reason ? `<br><b style="color:var(--fg)">Reason:</b> ${esc(t.reason)}` : "")}</p></div>
+      ${phoneHTML(t)}
+      ${isMineText ? `<button type="button" class="linkbtn" id="detailRemove" style="justify-self:start">${t.status === "pending" ? "Withdraw this text" : "Delete this text"}</button>` : ""}`;
+    $("backBtn").onclick = closeDetail;
+    if ($("detailRemove")) $("detailRemove").onclick = () => removeSub(t, closeDetail);
+    window.scrollTo({ top: 0 }); return;
+  }
+  const showCrowd = t.player || !!myVote;
+  d.innerHTML = `<button class="back" id="backBtn" type="button">‹ Back</button>${phoneHTML(t)}
+    ${isMineText || (t.player && adminKey) ? `<div class="row" style="align-items:center"><span class="hint">${isMineText ? `You added this ${ago(t.at)}` : "Added by a player"}</span><button type="button" class="linkbtn" id="detailRemove">Remove this text</button></div>` : ""}
+    ${showCrowd ? `<div class="answer" id="crowdPanel"><span class="label">${isMineText ? "How people rated your text" : myVote ? "Your vote vs. the crowd" : "Crowd verdict"}</span><p class="empty">Loading votes…</p></div>` : ""}
+    ${!t.player && t.score != null ? `<div class="answer" id="answer"><div class="row" style="align-items:center"><span class="label">The answer</span><button type="button" class="small-btn ghost" id="showAns">Show answer</button></div></div>` : ""}
+    ${t.player && !myVote && !isMineText ? `<button type="button" class="small-btn" id="detailVote" style="justify-self:start">Vote on this text</button>` : ""}
+    <div class="section"><div class="row"><span class="label">Comments</span><span class="hint threadCount"></span></div><div id="detailComments"></div></div>`;
+  $("backBtn").onclick = closeDetail;
+  if ($("detailRemove")) $("detailRemove").onclick = () => removeSub(t, closeDetail);
+  if ($("detailVote")) $("detailVote").onclick = () => { setMode("crowd"); showCrowdText(t); };
+  if (showCrowd) crowdAggregate(id).catch(() => null).then(agg => {
+    const p = $("crowdPanel"); if (!p || detailId !== id) return;
+    const mineV = myVote ? { p: myVote.p, tags: Array.isArray(myVote.tags) ? myVote.tags : [] } : null;
+    p.innerHTML = `<span class="label">${isMineText ? "How people rated your text" : mineV ? "Your vote vs. the crowd" : "Crowd verdict"}</span>${crowdHTML(agg, mineV)}${mineV ? `<p class="hint" style="margin:0">You voted ${ago(myVote.at)}: ${zoneName(mineV.p)}${mineV.tags.length ? " · " + esc(mineV.tags.join(", ")) : ""}</p>` : ""}`;
+  });
+  if ($("showAns")) $("showAns").onclick = () => {
+    const real = posOf(t.score);
+    $("answer").innerHTML = `<span class="label">The answer</span><div class="result"><div class="badge" style="background:${colorAt(real)}">${zoneName(real)}</div><div class="tagpills">${t.tags.map(x => `<span class="tagpill">${esc(x)}</span>`).join("")}</div></div><p class="why">${esc(t.why)}</p>${sourceLinks(t)}`;
+  };
+  mountComments($("detailComments"), id);
+  if (focusId) setTimeout(() => { const el = $("c-" + focusId); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" }); }, 900);
+  window.scrollTo({ top: 0 });
+}
+function closeDetail(){ detailId = null; mounted = null; $("commentsDetail").hidden = true; $("commentsDetail").innerHTML = ""; $("commentsList").hidden = false; renderFeed(); }
+function markSeen(){
+  const newest = activityList().reduce((m, r) => Math.max(m, r.at), 0);
+  if (newest <= lastSeen) return;
+  lastSeen = newest; paintBadge(); store("rfm-seen", String(lastSeen));
+}
+$("saveNick").onclick = async () => {
+  const v = $("nick").value.trim(), msg = $("nickMsg");
+  if (!online) { msg.textContent = offlineMsg(); return; }
+  try { const r = await api("/api/name", { method: "PUT", body: { name: v } }); myName = r.name; $("nick").value = r.name; msg.textContent = "Saved"; }
+  catch (e) { msg.textContent = errMsg(e, "Couldn't save. Try again."); }
+};
+
+/* ---------- learn ---------- */
+function renderGloss(){
+  $("gloss").innerHTML = TAGS.map(tag => {
+    const T = TAG[tag], sc = tag === "Healthy" ? 0 : tag === "Threats" ? 100 : 65;
+    return `<article class="gcard"><h3><i style="background:${colorAt(sc)}"></i>${esc(tag)}</h3><p>${esc(T.def[0].toUpperCase() + T.def.slice(1))}.</p>
+      <dl><dt>Sounds like</dt><dd>${esc(T.sounds)}</dd><dt>${tag === "Healthy" ? "Example" : "Healthy version"}</dt><dd>${esc(T.instead)}</dd></dl>
+      <div class="srcs">${(T.src || []).map(k => `<a href="${SRC[k].url}" target="_blank" rel="noopener">${esc(SRC[k].site)}: ${esc(SRC[k].name)} ↗</a>`).join("")}</div></article>`;
+  }).join("");
+}
+function renderStats(){ $("statBuilt").textContent = BUILTIN.length; $("statRemix").textContent = REMIX_COUNT.toLocaleString() + "+"; $("statSubs").textContent = subs.size; }
+
+/* ---------- gameplay stats (private: you + the owner) ---------- */
+const A = { doc: null, loaded: false, dirty: false, writing: false, timer: null, roundStart: Date.now() };
+const deviceClass = () => window.matchMedia("(max-width: 640px)").matches ? "phone" : window.matchMedia("(max-width: 1024px)").matches ? "tablet" : "desktop";
+const themeNow = () => window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+function aBase(){
+  return { first: Date.now(), last: Date.now(), sessions: 1, device: deviceClass(), theme: themeNow(),
+    modes: { classic: { rounds: 0, wins: 0, best: 0, opens: 0 }, hl: { rounds: 0, wins: 0, best: 0, opens: 0 }, blitz: { runs: 0, best: 0, answers: 0, correct: 0, opens: 0 }, crowd: { votes: 0, added: 0, opens: 0 } },
+    recent: [] };
+}
+function aDoc(){ if (!A.doc) A.doc = aBase(); return A.doc; }
+function track(fn, event){
+  const d = aDoc(); try { fn(d); } catch (e) {}
+  if (event) { d.recent.push({ ...event, at: Date.now() }); if (d.recent.length > 150) d.recent.splice(0, d.recent.length - 150); }
+  d.last = Date.now(); A.dirty = true; clearTimeout(A.timer); A.timer = setTimeout(aFlush, 5000);
+}
+async function aFlush(){
+  if (!A.dirty || A.writing || !A.loaded || !online) return;
+  A.writing = true; A.dirty = false;
+  try { await api("/api/analytics", { method: "PUT", body: { doc: A.doc } }); } catch (e) { A.dirty = true; }
+  A.writing = false; if (A.dirty) { clearTimeout(A.timer); A.timer = setTimeout(aFlush, 8000); }
+}
+async function aLoad(){
+  try {
+    const r = await api("/api/analytics");
+    const base = aBase(), prev = r && r.doc;
+    if (prev) {
+      base.first = +prev.first || base.first; base.sessions = (+prev.sessions || 0) + 1;
+      for (const m of Object.keys(base.modes)) base.modes[m] = { ...base.modes[m], ...(prev.modes && prev.modes[m] || {}) };
+      base.recent = Array.isArray(prev.recent) ? prev.recent.slice(-150) : [];
+    }
+    if (A.doc) { for (const m of Object.keys(base.modes)) for (const k of Object.keys(base.modes[m])) base.modes[m][k] = (k === "best") ? Math.max(base.modes[m][k], A.doc.modes[m][k]) : base.modes[m][k] + A.doc.modes[m][k]; base.recent = base.recent.concat(A.doc.recent).slice(-150); }
+    A.doc = base; A.loaded = true; A.dirty = true; clearTimeout(A.timer); A.timer = setTimeout(aFlush, 2000);
+  } catch (e) {}
+}
+
+/* ---------- feedback ---------- */
+const FB = { items: {}, pending: new Set(), loaded: false, writing: false, timer: null };
+async function fbLoad(){ try { const r = await api("/api/feedback"); FB.items = { ...(r.items || {}), ...FB.items }; FB.loaded = true; if (FB.pending.size) fbSchedule(); } catch (e) {} }
+function fbSchedule(){ clearTimeout(FB.timer); FB.timer = setTimeout(fbFlush, 1500); }
+async function fbFlush(){
+  if (!FB.pending.size || FB.writing || !FB.loaded || !online) return;
+  FB.writing = true;
+  const keys = [...FB.pending].slice(0, 20), items = {};
+  keys.forEach(k => { const v = FB.items[k]; items[k] = { s: v.s || 0, a: v.a || 0, note: v.note || "", m: v.m, label: labelKey(k) }; });
+  try { await api("/api/feedback", { method: "PUT", body: { items } }); keys.forEach(k => FB.pending.delete(k)); } catch (e) {}
+  FB.writing = false; if (FB.pending.size) fbSchedule();
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") { aFlush(); fbFlush(); } });
+function feedbackHTML(key, withAnswer){
+  const cur = FB.items[key] || {};
+  const pair = (kind, label) => `<div class="fbrow"><span>${label}</span><div class="fbbtns">
+    <button type="button" class="fbb" data-k="${kind}" data-v="1" aria-pressed="${cur[kind] === 1}" aria-label="${label}: good">👍</button>
+    <button type="button" class="fbb" data-k="${kind}" data-v="-1" aria-pressed="${cur[kind] === -1}" aria-label="${label}: bad">👎</button></div></div>`;
+  return `<div class="section fb" data-key="${esc(key)}"><span class="label">Feedback</span>
+    ${pair("s", "Was this a good scenario?")}${withAnswer ? pair("a", "Was the answer right?") : ""}
+    <textarea class="fbnote" maxlength="200" aria-label="Feedback note" placeholder="Anything off? (optional)">${esc(cur.note || "")}</textarea>
+    <span class="hint fbmsg">${cur.at ? "Thanks, your feedback is saved." : "Goes only to the game's owner."}</span></div>`;
+}
+function wireFeedback(root, key, modeKey){
+  const box = root.querySelector(".fb"); if (!box) return;
+  const save = patch => {
+    FB.items[key] = { ...(FB.items[key] || {}), ...patch, m: modeKey, at: Date.now() }; FB.pending.add(key); fbSchedule();
+    const m = box.querySelector(".fbmsg"); if (m) m.textContent = online ? "Thanks, your feedback is saved." : offlineMsg();
+  };
+  box.querySelectorAll(".fbb").forEach(b => b.onclick = () => {
+    const k = b.dataset.k, v = +b.dataset.v, cur = (FB.items[key] || {})[k], nv = cur === v ? 0 : v;
+    box.querySelectorAll(`.fbb[data-k="${k}"]`).forEach(x => x.setAttribute("aria-pressed", String(+x.dataset.v === nv)));
+    save({ [k]: nv });
+  });
+  const note = box.querySelector(".fbnote"); let nt = null;
+  note.oninput = () => { clearTimeout(nt); nt = setTimeout(() => save({ note: cleanStr(note.value, 200) }), 800); };
+}
+
+/* ---------- Insights (needs your ADMIN_KEY) ---------- */
+let insightsData = null;
+function insightsLogin(msg){
+  $("insightsBody").innerHTML = `<div class="panel"><h3>Unlock Insights</h3><p>Paste the ADMIN_KEY you set on your Cloudflare Worker. It's saved only in this browser.</p>
+    <div class="form"><label for="adminKey">Admin key<input type="text" id="adminKey" autocomplete="off" spellcheck="false"></label>
+    <div class="row" style="align-items:center"><span class="hint" id="adminMsg">${esc(msg || "")}</span><button type="button" class="small-btn" id="adminGo">Unlock</button></div></div></div>`;
+  $("adminGo").onclick = async () => {
+    adminKey = $("adminKey").value.trim(); if (!adminKey) return;
+    try { await api("/api/admin/insights", { admin: true }); store("rfm-admin", adminKey); $("nav-insights").hidden = false; renderInsights(); }
+    catch (e) { adminKey = ""; $("adminMsg").textContent = e && e.code === "bad_admin_key" ? "That key doesn't match." : errMsg(e, "Couldn't check the key."); }
+  };
+}
+async function renderInsights(){
+  const host = $("insightsBody");
+  if (!API) { host.innerHTML = `<p class="empty">Set your Worker URL in index.html first.</p>`; return; }
+  if (!adminKey) { insightsLogin(); return; }
+  host.innerHTML = `<p class="empty">Loading everything…</p>`;
+  await aFlush(); await fbFlush();
+  let r;
+  try { r = await api("/api/admin/insights", { admin: true }); }
+  catch (e) { if (e && e.code === "bad_admin_key") { adminKey = ""; store("rfm-admin", ""); insightsLogin("That key no longer matches."); } else host.innerHTML = `<p class="empty">${esc(errMsg(e, "Couldn't load insights."))}</p>`; return; }
+  insightsData = r;
+  let pending = [];
+  try { pending = (await api("/api/admin/pending", { admin: true })).items || []; } catch (e) {}
+  const players = r.players.map(p => p.doc || {});
+  const sum = f => players.reduce((s, p) => s + (+f(p) || 0), 0);
+  const M = k => p => p.modes && p.modes[k] || {};
+  const cR = sum(p => M("classic")(p).rounds), cW = sum(p => M("classic")(p).wins);
+  const hR = sum(p => M("hl")(p).rounds), hW = sum(p => M("hl")(p).wins);
+  const bA = sum(p => M("blitz")(p).answers), bC = sum(p => M("blitz")(p).correct), bRuns = sum(p => M("blitz")(p).runs);
+  const pct = (a, b) => b ? Math.round(a / b * 100) + "%" : "–";
+  const active7 = r.players.filter(p => +p.updated > Date.now() - 7 * 864e5).length;
+  const dev = {}; players.forEach(p => { dev[p.device || "unknown"] = (dev[p.device || "unknown"] || 0) + 1; });
+  const perText = {};
+  players.forEach(p => (p.recent || []).forEach(e => { if (e.m === "c" && e.id) { const x = perText[e.id] || (perText[e.id] = { n: 0, miss: 0, off: 0 }); x.n++; if (!e.ok) x.miss++; x.off += Math.abs((+e.r || 0) - (+e.g || 0)); } }));
+  const hardest = Object.entries(perText).filter(([, x]) => x.n >= 2).sort((a, b) => b[1].miss / b[1].n - a[1].miss / a[1].n).slice(0, 8);
+  const fb = {};
+  r.feedback.forEach(v => {
+    const x = fb[v.key] || (fb[v.key] = { sUp: 0, sDown: 0, aUp: 0, aDown: 0, notes: [], label: v.label });
+    if (v.s === 1) x.sUp++; if (v.s === -1) x.sDown++; if (v.a === 1) x.aUp++; if (v.a === -1) x.aDown++;
+    if (v.note) x.notes.push(v.note);
+  });
+  const fbList = Object.entries(fb).sort((a, b) => (b[1].sDown + b[1].aDown + b[1].notes.length) - (a[1].sDown + a[1].aDown + a[1].notes.length)).slice(0, 15);
+  const fbTotal = Object.values(fb).reduce((s, x) => s + x.sUp + x.sDown + x.aUp + x.aDown, 0);
+  const label = (k, fallback) => { const t = !k.includes("|") && scen(k); return t ? labelOf(t) : (fallback || labelKey(k)); };
+  const c = r.counts || {};
+  const kpi = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
+  host.innerHTML = `
+    <div class="panel" id="reviewQueue"><h3>Review queue ${pending.length ? `<span class="stchip st-pending">${pending.length} waiting</span>` : ""}</h3>
+      ${pending.length ? pending.map(p => `<div class="rq" data-id="${esc(p.id)}">${phoneHTML(normalizeSub(p.id, p) || { name: p.name, msgs: [], player: true }, { compact: true })}
+        <span class="hint">From player ${esc(p.author)} · ${ago(p.at)}</span>
+        <input type="text" class="rq-reason" maxlength="200" placeholder="Reason if declining (optional, shown to the player)" aria-label="Decline reason">
+        <div class="rq-btns"><button type="button" class="small-btn rq-acc">✅ Accept</button><button type="button" class="small-btn rq-dec">❌ Decline</button></div></div>`).join("")
+      : `<p>No texts waiting. New ones also arrive in Discord with Accept and Decline links.</p>`}</div>
+    <div class="panel"><p>Discord webhook: <b>${r.webhook ? `connected` : `not set`}</b>${r.webhook ? ` · ${r.webhookQueue} event${r.webhookQueue === 1 ? "" : "s"} waiting to send` : " · add DISCORD_WEBHOOK as a secret on the Worker"}</p></div>
+    <div class="kpis">${kpi(c.players || 0, "Players")}${kpi(active7, "Active 7d")}${kpi(cR + hR + bA + (c.votes || 0), "Answers")}${kpi(c.votes || 0, "Crowd votes")}${kpi(c.submissions || 0, "Player texts")}${kpi(c.comments || 0, "Comments")}</div>
+    <div class="panel"><h3>Modes</h3><div class="tablewrap"><table class="itable"><thead><tr><th>Mode</th><th>Played</th><th>Correct</th><th>Opens</th></tr></thead><tbody>
+      <tr><td>Classic Meter</td><td>${cR} rounds</td><td>${pct(cW, cR)}</td><td>${sum(p => M("classic")(p).opens)}</td></tr>
+      <tr><td>Which Is Worse?</td><td>${hR} matchups</td><td>${pct(hW, hR)}</td><td>${sum(p => M("hl")(p).opens)}</td></tr>
+      <tr><td>Red or Green Blitz</td><td>${bRuns} runs · ${bA} answers</td><td>${pct(bC, bA)}</td><td>${sum(p => M("blitz")(p).opens)}</td></tr>
+      <tr><td>Crowd Verdict</td><td>${c.votes || 0} votes · ${c.submissions || 0} texts</td><td>–</td><td>${sum(p => M("crowd")(p).opens)}</td></tr>
+    </tbody></table></div>
+    <p>Devices: ${Object.entries(dev).map(([k, v]) => `${esc(k)} ${v}`).join(" · ") || "–"}</p></div>
+    <div class="panel"><h3>Feedback (${fbTotal} ratings)</h3>${fbList.length ? fbList.map(([k, x]) => `<div class="fbitem"><b>${esc(label(k, x.label))}</b>
+      <span class="hint">Scenario 👍 ${x.sUp} 👎 ${x.sDown}${x.aUp + x.aDown ? ` · Answer 👍 ${x.aUp} 👎 ${x.aDown}` : ""}</span>
+      ${x.notes.slice(0, 3).map(n => `<span class="fbnote-q">"${esc(n)}"</span>`).join("")}</div>`).join("") : `<p>No feedback yet. Players see 👍/👎 buttons after every round.</p>`}</div>
+    <div class="panel"><h3>Hardest texts (Classic)</h3>${hardest.length ? hardest.map(([id, x]) => `<div class="fbitem"><b>${esc(label(id))}</b><span class="hint">${x.miss} of ${x.n} missed · average miss distance ${Math.round(x.off / x.n)} points</span></div>`).join("") : `<p>Needs a few more rounds to show.</p>`}</div>
+    <div class="panel"><h3>Export</h3><p>Copies all the raw data (stats, votes, feedback, texts, comments). Players appear only as short anonymous tags.</p>
+      <div class="row" style="align-items:center"><span class="hint" id="exportMsg"></span><button type="button" class="small-btn" id="exportBtn">Copy all data as JSON</button></div>
+      <textarea id="exportBox" class="exportbox" readonly hidden aria-label="Exported data"></textarea></div>
+    <button type="button" class="linkbtn" id="adminOut" style="justify-self:start">Lock Insights on this device</button>`;
+  $("exportBtn").onclick = async () => {
+    const text = JSON.stringify(insightsData, null, 1);
+    try { await navigator.clipboard.writeText(text); $("exportMsg").textContent = `Copied ${Math.round(text.length / 1024)} KB`; }
+    catch (e) { const b = $("exportBox"); b.hidden = false; b.value = text; b.focus(); b.select(); $("exportMsg").textContent = "Select all and copy"; }
+  };
+  host.querySelectorAll(".rq").forEach(el => {
+    const go = async action => {
+      el.querySelectorAll("button").forEach(b => b.disabled = true);
+      try {
+        await api("/api/admin/review", { method: "POST", admin: true, body: { id: el.dataset.id, action, reason: el.querySelector(".rq-reason").value } });
+        SFX.play(action === "approve" ? "approve" : "decline"); if (action === "approve") burst(30);
+        el.classList.add(action === "approve" ? "rq-out-ok" : "rq-out-no");
+        setTimeout(renderInsights, 450);
+      } catch (e) { el.querySelectorAll("button").forEach(b => b.disabled = false); toast(errMsg(e, "Couldn't save that. Try again.")); }
+    };
+    el.querySelector(".rq-acc").onclick = () => go("approve");
+    el.querySelector(".rq-dec").onclick = () => go("decline");
+  });
+  $("adminOut").onclick = () => { adminKey = ""; store("rfm-admin", ""); $("nav-insights").hidden = true; showView("play"); };
+}
+$("refreshInsights").onclick = renderInsights;
+
+
+/* ---------- sound effects (made in the browser, no files) ---------- */
+const SFX = (() => {
+  let ctx = null, on = load("rfm-sound") !== "off";
+  const ensure = () => {
+    if (!ctx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; ctx = new C(); }
+    if (ctx.state === "suspended") ctx.resume();
+    return ctx;
+  };
+  function tone(freq, dur, { type = "sine", vol = 0.12, at = 0, slide = 0, attack = 0.006 } = {}){
+    const c = ensure(); if (!c) return;
+    const t0 = c.currentTime + at, o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t0);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq * slide), t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + attack); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g).connect(c.destination); o.start(t0); o.stop(t0 + dur + 0.03);
+  }
+  function noise(dur, { vol = 0.06, at = 0, hp = 800 } = {}){
+    const c = ensure(); if (!c) return;
+    const len = Math.max(1, Math.floor(c.sampleRate * dur)), buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+    s.buffer = buf; f.type = "highpass"; f.frequency.value = hp; g.gain.value = vol;
+    s.connect(f).connect(g).connect(c.destination); s.start(c.currentTime + at);
+  }
+  const S = {
+    tap:     () => tone(520, .06, { type: "triangle", vol: .07 }),
+    tick:    () => tone(1250, .025, { type: "square", vol: .02 }),
+    chipOn:  () => { tone(660, .07, { type: "triangle", vol: .08 }); tone(990, .08, { type: "triangle", vol: .05, at: .04 }); },
+    chipOff: () => tone(440, .06, { type: "triangle", vol: .05, slide: .8 }),
+    lock:    () => { noise(.16, { vol: .05, hp: 1600 }); tone(300, .18, { vol: .09, slide: 2.2 }); },
+    win:     () => [523, 659, 784, 1047].forEach((f, i) => tone(f, .18, { type: "triangle", vol: .11, at: .12 + i * .07 })),
+    fire:    () => { noise(.55, { vol: .06, hp: 350, at: .1 }); [784, 988, 1175, 1568].forEach((f, i) => tone(f, .15, { type: "square", vol: .045, at: .15 + i * .055 })); },
+    lose:    () => { tone(220, .32, { type: "sawtooth", vol: .05, slide: .6, at: .1 }); tone(165, .38, { type: "sawtooth", vol: .04, at: .2, slide: .6 }); },
+    vote:    () => { tone(392, .1, { type: "triangle", vol: .09 }); tone(587, .16, { type: "triangle", vol: .09, at: .08 }); },
+    post:    () => tone(700, .1, { vol: .09, slide: 1.6 }),
+    ding:    () => { tone(1318, .35, { vol: .07 }); tone(1760, .45, { vol: .045, at: .07 }); },
+    send:    () => { noise(.25, { vol: .04, hp: 2200 }); tone(480, .28, { vol: .07, slide: 2.2 }); },
+    approve: () => [659, 784, 988, 1319].forEach((f, i) => tone(f, .24, { vol: .09, at: i * .09 })),
+    decline: () => { tone(330, .2, { type: "triangle", vol: .09 }); tone(247, .32, { type: "triangle", vol: .09, at: .15 }); },
+    good:    () => tone(880, .07, { type: "square", vol: .04 }),
+    bad:     () => tone(140, .16, { type: "square", vol: .06 }),
+    count:   () => tone(1000, .05, { vol: .05 }),
+    end:     () => [784, 659, 784, 1047].forEach((f, i) => tone(f, .17, { type: "triangle", vol: .09, at: i * .11 })),
+    whoosh:  () => noise(.22, { vol: .035, hp: 2600 })
+  };
+  return {
+    quiet: false,
+    play(n){ if (!on || this.quiet || !S[n]) return; try { S[n](); } catch (e) {} },
+    get on(){ return on; },
+    set(v){ on = v; store("rfm-sound", v ? "on" : "off"); if (v) { ensure(); S.chipOn(); } }
+  };
+})();
+function paintSoundBtn(){ const b = $("soundBtn"); b.textContent = SFX.on ? "🔊" : "🔇"; b.setAttribute("aria-label", SFX.on ? "Sound on. Tap to mute" : "Sound off. Tap to turn on"); b.setAttribute("aria-pressed", String(SFX.on)); }
+$("soundBtn").onclick = () => { SFX.set(!SFX.on); paintSoundBtn(); };
+paintSoundBtn();
+
+/* ---------- animations ---------- */
+const calm = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function burst(n = 40, hues){
+  if (calm()) return;
+  const cv = document.createElement("canvas"); cv.className = "fx"; document.body.appendChild(cv);
+  const dpr = Math.min(2, window.devicePixelRatio || 1), W = innerWidth, H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr; const x = cv.getContext("2d"); x.scale(dpr, dpr);
+  const cols = hues || ["#34d27b", "#f2c230", "#ff8a2a", "#ff4d61", "#0a84ff", "#f4f2f8"];
+  const ps = Array.from({ length: n }, () => ({ x: W / 2 + (Math.random() - .5) * 120, y: H * .42, vx: (Math.random() - .5) * 11, vy: -Math.random() * 12 - 4, r: Math.random() * 6 + 4, a: Math.random() * 6, va: (Math.random() - .5) * .4, c: cols[Math.floor(Math.random() * cols.length)] }));
+  const t0 = performance.now();
+  (function frame(t){
+    const k = (t - t0) / 1400; x.clearRect(0, 0, W, H);
+    ps.forEach(p => { p.vy += .38; p.x += p.vx; p.y += p.vy; p.a += p.va; x.save(); x.globalAlpha = Math.max(0, 1 - k); x.translate(p.x, p.y); x.rotate(p.a); x.fillStyle = p.c; x.fillRect(-p.r / 2, -p.r / 4, p.r, p.r / 2); x.restore(); });
+    if (k < 1) requestAnimationFrame(frame); else cv.remove();
+  })(t0);
+}
+function shake(el){ if (!el || calm() || !el.animate) return; el.animate([{ transform: "translateX(0)" }, { transform: "translateX(-9px)" }, { transform: "translateX(8px)" }, { transform: "translateX(-5px)" }, { transform: "translateX(3px)" }, { transform: "translateX(0)" }], { duration: 420, easing: "ease-out" }); }
+function flameUp(){ if (calm()) return; const p = $("streakPill"); const f = document.createElement("span"); f.className = "flameup"; f.textContent = "🔥"; p.appendChild(f); setTimeout(() => f.remove(), 900); }
+
+/* hook sounds + motion into the game without changing its rules */
+document.addEventListener("click", e => {
+  const el = e.target.closest("button"); if (!el || el.disabled) return;
+  if (el.classList.contains("chip") || el.classList.contains("fbb")) { setTimeout(() => SFX.play(el.getAttribute("aria-pressed") === "true" ? "chipOn" : "chipOff"), 0); return; }
+  if (el.matches(".nav button, .subtabs button, .mcard, .small-btn, .linkbtn, .back, #soundBtn, #openSubmit")) { if (el.id !== "soundBtn") SFX.play("tap"); }
+}, true);
+let lastZone = -1;
+document.addEventListener("input", e => { if (e.target.matches(".slider input")) { const z = Math.floor(+e.target.value / 10); if (z !== lastZone) { lastZone = z; SFX.play("tick"); } } });
+{
+  const _reveal = classicReveal;
+  classicReveal = function(){
+    SFX.play("lock"); _reveal.apply(this, arguments);
+    if (classic.lastWin) { const big = classic.streak > 0 && classic.streak % 5 === 0; SFX.play(big ? "fire" : "win"); burst(big ? 80 : 36); flameUp(); }
+    else { SFX.play("lose"); shake($("phone")); }
+  };
+  const _hl = hlChoose;
+  hlChoose = function(side){
+    const was = hl.done; _hl.apply(this, arguments); if (was) return;
+    if (hl.win) { SFX.play(hl.streak % 5 === 0 ? "fire" : "win"); burst(30); flameUp(); } else { SFX.play("lose"); shake($("hlCol" + side)); }
+  };
+  const _ans = blitzAnswer;
+  blitzAnswer = function(red){ const before = blitz.score, run = blitz.running; _ans.apply(this, arguments); if (run) SFX.play(blitz.score > before ? "good" : "bad"); };
+  const _bstart = blitzStart;
+  blitzStart = function(){ SFX.play("whoosh"); _bstart.apply(this, arguments); };
+  let lastCount = 99;
+  const _btick = blitzTick;
+  blitzTick = function(){ _btick.apply(this, arguments); const s = Math.ceil(blitz.left); if (blitz.running && s <= 5 && s !== lastCount && s > 0) SFX.play("count"); lastCount = s; };
+  const _bstop = blitzStop;
+  blitzStop = function(finished){ const run = blitz.running; _bstop.apply(this, arguments); if (run && finished) { SFX.play("end"); if (blitz.score >= bestOf("blitz") && blitz.score > 0) burst(60); } };
+  const _vote = crowdVote;
+  crowdVote = async function(){ if (crowd.current && crR.guess !== null && crR.picked.size) SFX.play("vote"); return _vote.apply(this, arguments); };
+  const _mode = setMode;
+  setMode = function(m){ SFX.play("whoosh"); return _mode.apply(this, arguments); };
+  $("lock").onclick = () => { if (!classic.revealed && cR.guess !== null && cR.picked.size) classicReveal(); };
+  $("crowdVote").onclick = () => crowdVote();
+  $("hlPickA").onclick = () => hlChoose("A");
+  $("hlPickB").onclick = () => hlChoose("B");
+  $("blitzGo").onclick = () => blitzStart();
+  $("blitzRed").onclick = () => blitzAnswer(true);
+  $("blitzGreen").onclick = () => blitzAnswer(false);
+}
+
+/* ---------- boot ---------- */
+(async () => {
+  $("nav-insights").hidden = !adminKey;
+  if (!API) { capsSettled = true; $("setupNote").hidden = false; if (mounted) drawComments(); renderFeed(); return; }
+  try { const h = await api("/api/hello", { method: "POST", body: {} }); online = true; myName = h.name || null; if (myName) $("nick").value = myName; }
+  catch (e) { online = false; }
+  capsSettled = true;
+  if (!online) { if (mounted) { drawComments(); drawComposer(); } renderFeed(); return; }
+  try { const r = await api("/api/submissions"); (r.items || []).forEach(x => { const t = normalizeSub(x.id, x); if (t) subs.set(t.id, t); }); } catch (e) {}
+  aLoad(); fbLoad(); pollMe(true);
+  if (activeTextId()) watchThread(activeTextId());
+  if (mounted) { drawComments(); drawComposer(); }
+  renderStats(); paintTop(); renderFeed();
+  if (mode === "crowd" && crowd.current && !crowd.current.player && subs.size && !sheetOpen() && crR.guess === null) crowdNext();
+})();
+
+/* ---------- start ---------- */
+
+renderGloss(); renderStats();
+SFX.quiet = true; setMode(mode); SFX.quiet = false;
+const startHash = (location.hash || "").slice(1);
+if (["play", "modes", "comments", "learn", "insights"].includes(startHash)) showView(startHash);
+</script>
+
+</body>
+</html>
